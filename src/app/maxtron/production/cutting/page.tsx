@@ -1,0 +1,628 @@
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import { usePathname } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { 
+  Plus, Search, Edit, Trash2, X, Save, 
+  Settings, Calendar, Hash, User, 
+  Scissors, Activity, Layers, ArrowRightLeft, Clock, FileText, Trash, Package
+} from 'lucide-react';
+import { TableView } from '@/components/ui/table-view';
+import { useToast } from '@/components/ui/toast';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { useConfirm } from '@/components/ui/confirm-dialog';
+import { usePermission } from '@/hooks/usePermission';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
+const CONVERSION_API = `${API_BASE}/api/maxtron/production/conversions`;
+const BATCH_API = `${API_BASE}/api/maxtron/production/batches`;
+const PRINTING_API = `${API_BASE}/api/maxtron/production/printing`;
+const EMPLOYEES_API = `${API_BASE}/api/maxtron/employees`;
+const PRODUCTS_API = `${API_BASE}/api/maxtron/products`;
+
+export default function CuttingSealingPage() {
+  const { hasPermission } = usePermission();
+  const canCreate = hasPermission('prod_cutting_view', 'create');
+  const canEdit = hasPermission('prod_cutting_view', 'edit');
+  const canDelete = hasPermission('prod_cutting_view', 'delete');
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [conversions, setConversions] = useState<any[]>([]);
+  const [batches, setBatches] = useState<any[]>([]);
+  const [printingJobs, setPrintingJobs] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [finishedProducts, setFinishedProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentCompanyId, setCurrentCompanyId] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const { success, error, info } = useToast();
+  const { confirm } = useConfirm();
+  const pathname = usePathname();
+  const activeTenant = pathname?.startsWith('/keil') ? 'KEIL' : 'MAXTRON';
+
+  const [formData, setFormData] = useState({
+    batch_id: '',
+    batch_item_id: '',
+    input_qty: 0,
+    operator_id: '',
+    shift: 'General',
+    date: new Date().toISOString().split('T')[0],
+    remarks: '',
+    company_id: '',
+    items: [{ product_id: '', quantity: 0, bags_per_kg: 0, micron_size: '' }] as { product_id: string; quantity: number; bags_per_kg: number; micron_size: string }[]
+  });
+  // The roll's available_qty from the server already has this entry's own
+  // draw subtracted, so while editing the cap is available + what it drew.
+  const [editingInputQty, setEditingInputQty] = useState(0);
+
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
+
+  const fetchInitialData = async () => {
+    setLoading(true);
+    const token = localStorage.getItem('token');
+    try {
+      const compRes = await fetch(`${API_BASE}/api/maxtron/companies`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const compData = await compRes.json();
+      let coId = '';
+      if (compData.success) {
+        const activeCo = compData.data.find((c: any) => c.company_name.toUpperCase() === activeTenant);
+        if (activeCo) {
+          coId = activeCo.id;
+          setCurrentCompanyId(coId);
+          setFormData(prev => ({ ...prev, company_id: coId }));
+        }
+      }
+
+      const [batchRes, empRes, prodRes, printRes] = await Promise.all([
+        fetch(`${BATCH_API}?company_id=${coId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${EMPLOYEES_API}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${PRODUCTS_API}?company_id=${coId}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${PRINTING_API}?company_id=${coId}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      ]);
+      
+      const batchData = await batchRes.json();
+      const empData = await empRes.json();
+      const prodData = await prodRes.json();
+      const printData = await printRes.json();
+      
+      if (batchData.success) setBatches(batchData.data);
+      if (prodData.success) setFinishedProducts(prodData.data);
+      if (printData.success) setPrintingJobs(printData.data);
+      if (empData.success) {
+        // Filter by "Cutting & Sealing" category if it exists, otherwise show all production staff
+        const categoryEmp = empData.data.filter((e: any) => 
+            e.companies?.company_name?.toUpperCase() === activeTenant &&
+            (e.employee_categories?.category_name === 'Cutting & Sealing' || e.user_types?.name === 'production')
+        );
+        setEmployees(categoryEmp.length > 0 ? categoryEmp : empData.data.filter((e: any) => e.companies?.company_name?.toUpperCase() === activeTenant));
+      }
+
+      fetchConversions(coId);
+    } catch (err) {
+      console.error('Error fetching initial data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchConversions = async (coId?: string) => {
+    const token = localStorage.getItem('token');
+    const targetCoId = coId || currentCompanyId;
+    try {
+      const res = await fetch(`${CONVERSION_API}?company_id=${targetCoId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setConversions(data.data);
+      }
+    } catch (err) {
+      console.error('Error fetching conversions:', err);
+    }
+  };
+
+  const handleEdit = (c: any) => {
+    setEditingId(c.id);
+    setEditingInputQty(parseFloat(c.input_qty) || 0);
+    setFormData({
+      batch_id: c.batch_id,
+      batch_item_id: c.batch_item_id || '',
+      input_qty: parseFloat(c.input_qty) || 0,
+      operator_id: c.operator_id,
+      shift: c.shift || 'General',
+      date: c.date?.split('T')[0] || new Date().toISOString().split('T')[0],
+      remarks: c.remarks || '',
+      company_id: c.company_id,
+      items: c.items?.map((it: any) => ({
+          product_id: it.product_id,
+          quantity: parseFloat(it.quantity) || 0,
+          bags_per_kg: parseFloat(it.bags_per_kg) || 0,
+          micron_size: it.micron_size || ''
+      })) || []
+    });
+    setShowForm(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    const isConfirmed = await confirm({
+      message: 'Are you sure you want to delete this cutting & sealing entry? This action cannot be undone.',
+      type: 'danger'
+    });
+
+    if (!isConfirmed) return;
+
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${CONVERSION_API}/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        success('Entry deleted successfully');
+        fetchInitialData(); // roll balances changed, not just the log
+      } else {
+        error(data.message);
+      }
+    } catch (err) {
+      error('Error deleting entry');
+    }
+  };
+
+  const addItem = () => {
+    setFormData({
+      ...formData,
+      items: [...formData.items, { product_id: '', quantity: 0, bags_per_kg: 0, micron_size: '' }]
+    });
+  };
+
+  const removeItem = (index: number) => {
+    const newItems = [...formData.items];
+    newItems.splice(index, 1);
+    setFormData({ ...formData, items: newItems });
+  };
+
+  const handleItemChange = (index: number, field: string, value: any) => {
+    const newItems = [...formData.items];
+    let newValue = value;
+
+    if (field === 'quantity') {
+        const otherItemsTotal = formData.items.reduce((sum, it, i) => i === index ? sum : sum + it.quantity, 0);
+        const maxAllowed = Math.max(0, formData.input_qty - otherItemsTotal);
+        
+        if (value > maxAllowed) {
+            newValue = maxAllowed;
+            info(`Quantity capped at ${maxAllowed.toFixed(2)} Kg to match total input.`);
+        }
+    }
+
+    newItems[index] = { ...newItems[index], [field]: newValue };
+    setFormData({ ...formData, items: newItems });
+  };
+
+  const saveConversion = async () => {
+    if (!formData.batch_item_id || !formData.operator_id) {
+      error('Please select a roll and operator.');
+      return;
+    }
+    if (formData.items.length === 0) {
+      error('Please add at least one finished product entry.');
+      return;
+    }
+    if (formData.input_qty <= 0) {
+      error('Input quantity must be greater than 0.');
+      return;
+    }
+    if (formData.input_qty > rollCap + 0.0005) {
+      error(`Only ${rollCap.toFixed(2)} Kg left on this roll.`);
+      return;
+    }
+
+    const totalOutput = formData.items.reduce((sum, it) => sum + it.quantity, 0);
+
+    if (totalOutput > formData.input_qty) {
+        error(`Total output (${totalOutput.toFixed(2)} Kg) exceeds input quantity (${formData.input_qty.toFixed(2)} Kg).`);
+        return;
+    }
+
+    const totalWastage = formData.input_qty - totalOutput;
+    const token = localStorage.getItem('token');
+    const method = editingId ? 'PUT' : 'POST';
+    const url = editingId ? `${CONVERSION_API}/${editingId}` : CONVERSION_API;
+
+    setSubmitting(true);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+           ...formData,
+           output_qty: totalOutput,
+           wastage_qty: totalWastage
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        success(editingId ? 'Cutting & Sealing entry updated' : 'Cutting & Sealing entry recorded');
+        setShowForm(false);
+        setEditingId(null);
+        resetForm();
+        fetchInitialData(); // roll balances changed, not just the log
+      } else {
+        error(data.message);
+      }
+    } catch (err) {
+      error('Error saving conversion');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resetForm = () => {
+    setEditingInputQty(0);
+    setFormData({
+      batch_id: '',
+      batch_item_id: '',
+      input_qty: 0,
+      operator_id: '',
+      shift: 'General',
+      date: new Date().toISOString().split('T')[0],
+      remarks: '',
+      company_id: currentCompanyId,
+      items: [{ product_id: '', quantity: 0, bags_per_kg: 0, micron_size: '' }]
+    });
+  };
+
+  const filteredConversions = conversions.filter(c =>
+    c.conversion_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.production_batches?.batch_number?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  /* Cutting draws from a ROLL (one product of one batch), not a batch: one
+   * extrusion run can produce Green 424 Kg and Transparent 776 Kg, and the
+   * floor cuts part of a roll per shift. So the list is every roll with
+   * balance left, and a roll stays listed until the server says it is empty. */
+  const availableRolls = useMemo(() => {
+    const printedItemIds = new Set(printingJobs.map(j => j.batch_item_id));
+
+    return batches
+      .flatMap(b => (b.items || []).map((it: any) => ({ ...it, batch: b })))
+      .filter((r: any) => {
+        if (r.id === formData.batch_item_id) return true; // the one being edited
+        if ((Number(r.available_qty) || 0) <= 0) return false;
+
+        const color = (r.finished_products?.color || '').toUpperCase();
+        // requires_printing is a batch-level flag that extrusion switches ON when
+        // ANY product in the batch might need printing — so on a mixed batch it
+        // would block the green roll because the transparent one was flagged.
+        // Per roll: wait for printing only if the batch says so AND this roll's
+        // own colour is a printed colour. Unticking the flag on the batch still
+        // lets every roll straight through.
+        const requiresPrinting = (r.batch.requires_printing ?? true) && ['BLUE', 'RED', 'YELLOW'].includes(color);
+        return requiresPrinting ? printedItemIds.has(r.id) : true;
+      });
+  }, [batches, printingJobs, formData.batch_item_id]);
+
+  const selectedRoll = availableRolls.find((r: any) => r.id === formData.batch_item_id);
+  const rollCap = (Number(selectedRoll?.available_qty) || 0) + (editingId ? editingInputQty : 0);
+
+  const totalOutput = formData.items.reduce((sum, it) => sum + it.quantity, 0);
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-700 overflow-hidden">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 md:p-6 rounded-xl shadow-sm border border-primary/10">
+        <div className="space-y-1">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+            <Scissors className="w-8 h-8 md:w-10 md:h-10 text-primary shrink-0" /> <span className="truncate text-primary">Cutting & Sealing</span>
+          </h1>
+          <p className="text-muted-foreground text-xs md:text-sm font-medium">Record and manage secondary processing output.</p>
+        </div>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          {!showForm && canCreate && (
+            <Button 
+                onClick={() => {
+                   setEditingId(null);
+                   resetForm();
+                   setShowForm(true);
+                }} 
+                className="bg-primary hover:bg-primary/95 text-white px-6 rounded-full shadow-lg shadow-primary/20 h-10 md:h-11 transition-all hover:scale-105 active:scale-95 w-full md:w-auto flex-1 md:flex-none"
+            >
+              <Plus className="w-4 h-4 mr-2" /> New Cutting Entry
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {showForm && (
+        <Card className="border-primary/20 shadow-xl animate-in slide-in-from-top duration-500 overflow-hidden">
+          <CardHeader className="bg-primary/5 border-b border-primary/10 py-4">
+            <CardTitle className="text-xl flex items-center gap-2 text-primary">
+              <Scissors className="w-5 h-5" /> {editingId ? 'Edit Processing Job' : 'Processing Job Entry'}
+            </CardTitle>
+            <CardDescription className="text-primary/70">{editingId ? 'Update details for the existing cutting & sealing job.' : 'Secondary conversion from extrusion batches to finished products.'}</CardDescription>
+          </CardHeader>
+          <CardContent className="p-6 space-y-8">
+            {/* Header Fields */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Hash className="w-4 h-4 text-primary" /> Cutting No</label>
+                <Input value="AUTO-GENERATED" disabled className="bg-slate-50 font-mono text-xs h-10" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Calendar className="w-4 h-4 text-primary" /> Date of Job</label>
+                <Input type="date" className="h-10" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Clock className="w-4 h-4 text-primary" /> Production Shift</label>
+                <Select value={formData.shift} onValueChange={(val) => setFormData({ ...formData, shift: val })}>
+                  <SelectTrigger className="h-10 w-full border-input bg-background shadow-sm">
+                    <SelectValue placeholder="Select Shift" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-input">
+                    <SelectItem value="General">General</SelectItem>
+                    <SelectItem value="Day">Day</SelectItem>
+                    <SelectItem value="Night">Night</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><User className="w-4 h-4 text-primary" /> Operator</label>
+                <Select value={formData.operator_id} onValueChange={(val) => setFormData({ ...formData, operator_id: val })}>
+                  <SelectTrigger className="h-10 w-full border-input bg-background shadow-sm">
+                    <SelectValue placeholder="Select Operator" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-input">
+                    {employees.map(e => (
+                      <SelectItem key={e.id} value={e.id}>{e.name} ({e.employee_code})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Activity className="w-4 h-4 text-primary" /> Base Roll (Batch · Product)</label>
+                <Select
+                  value={formData.batch_item_id}
+                  onValueChange={(val) => {
+                    const roll = availableRolls.find((r: any) => r.id === val);
+                    const available = Number(roll?.available_qty) || 0;
+
+                    setFormData({
+                        ...formData,
+                        batch_id: roll?.batch?.id || '',
+                        batch_item_id: val,
+                        input_qty: available,
+                        // Strictly lock item to the roll's product
+                        items: roll?.product_id ? [{
+                          product_id: roll.product_id,
+                          quantity: available,
+                          bags_per_kg: 0,
+                          micron_size: ''
+                        }] : []
+                    });
+                  }}
+                >
+                  <SelectTrigger className="h-10 w-full border-input bg-background shadow-sm font-bold">
+                    <SelectValue placeholder="Select Roll" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-input">
+                    {availableRolls.map((r: any) => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.batch.batch_number} · {r.finished_products?.product_name || 'N/A'} ({(Number(r.available_qty) || 0).toFixed(1)} of {r.output_qty} Kg left)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                  <Package className="w-4 h-4 text-primary" /> Finished Product (From Source)
+                </label>
+                {(() => {
+                  const prod = selectedRoll?.finished_products;
+                  return (
+                    <Input
+                      value={prod?.product_name ? `${prod.product_name} (${prod.product_code || 'PROD'})` : (formData.batch_item_id ? 'Loading...' : 'Select Roll First')}
+                      readOnly
+                      className="bg-slate-50 font-bold h-10 cursor-not-allowed text-primary"
+                    />
+                  );
+                })()}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Layers className="w-4 h-4 text-primary" /> Input Qty (Kg)</label>
+                <Input
+                  type="number"
+                  value={formData.input_qty || ''}
+                  max={rollCap}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value) || 0;
+                    // Output follows input until the operator adjusts it for wastage
+                    setFormData({ ...formData, input_qty: v, items: formData.items.map((it, i) => i === 0 ? { ...it, quantity: v } : it) });
+                  }}
+                  placeholder="0.00"
+                  className="font-bold h-10"
+                />
+                {formData.batch_item_id && (
+                  <p className={`text-[11px] font-medium ${formData.input_qty > rollCap ? 'text-rose-600' : 'text-muted-foreground'}`}>
+                    {rollCap.toFixed(2)} Kg available on this roll
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-4 border-t">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Package className="w-4 h-4 text-emerald-500" /> Output Qty (Kg)</label>
+                <Input 
+                  type="number" 
+                  value={formData.items[0]?.quantity || ''} 
+                  onChange={e => handleItemChange(0, 'quantity', parseFloat(e.target.value) || 0)} 
+                  placeholder="0.00"
+                  className="h-10 font-bold text-emerald-700" 
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Layers className="w-4 h-4 text-amber-500" /> Bags Per Kg</label>
+                <Input 
+                  type="number" 
+                  value={formData.items[0]?.bags_per_kg || ''} 
+                  onChange={e => handleItemChange(0, 'bags_per_kg', parseFloat(e.target.value) || 0)} 
+                  placeholder="0.0"
+                  className="h-10" 
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Settings className="w-4 h-4 text-blue-500" /> Micron Size</label>
+                <Input 
+                  value={formData.items[0]?.micron_size || ''} 
+                  onChange={e => handleItemChange(0, 'micron_size', e.target.value)} 
+                  placeholder="Micron"
+                  className="h-10" 
+                />
+              </div>
+            </div>
+
+            
+
+            {/* Summary and Remarks */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-6 border-t font-sans">
+                <div className="space-y-2">
+                    <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><FileText className="w-4 h-4 text-primary" /> Remarks</label>
+                    <textarea 
+                        className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        placeholder="Any specific observations or wastage details..."
+                        value={formData.remarks}
+                        onChange={e => setFormData({ ...formData, remarks: e.target.value })}
+                    />
+                </div>
+                <div className="bg-slate-50 p-6 rounded-xl border border-slate-100 space-y-4">
+                    <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-600">Total Input Qty</span>
+                        <span className="font-bold">{formData.input_qty.toFixed(2)} Kg</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-600">Total Output (Cut & Sealed)</span>
+                        <span className="font-bold text-primary">{totalOutput.toFixed(2)} Kg</span>
+                    </div>
+                    <div className="flex justify-between items-center border-t pt-2">
+                        <span className="text-slate-600 font-bold uppercase text-xs">Total Wastage</span>
+                        <span className={`font-black text-xl ${(formData.input_qty - totalOutput) > 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                            {(formData.input_qty - totalOutput).toFixed(2)} <span className="text-xs">Kg</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="mt-8 flex flex-col md:flex-row justify-end gap-3 pt-6 border-t px-4 md:px-0">
+              <Button 
+                variant="outline" 
+                onClick={() => { setShowForm(false); resetForm(); }} 
+                className="flex-1 md:flex-none px-8 rounded-full h-12 order-2 md:order-1"
+              >
+                Cancel Entry
+              </Button>
+              <Button 
+                onClick={saveConversion} 
+                loading={submitting}
+                className="flex-1 md:flex-none bg-primary hover:bg-primary/95 text-white px-10 rounded-full shadow-lg shadow-primary/20 h-12 transition-all hover:scale-105 active:scale-95 order-1 md:order-2 font-bold"
+              >
+                <Save className="w-4 h-4 mr-2" /> Save Cutting Entry
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!showForm && (
+        <TableView
+          title="Conversion Log"
+          description="Detailed history of processed quantities and cutting jobs."
+          headers={['Job No', 'Date', 'Batch', 'Items Produced', 'Input', 'Output', 'Wastage', 'Operator', 'Actions']}
+          data={conversions}
+          loading={loading}
+          deleteUrl={CONVERSION_API}
+          onRefresh={() => fetchConversions(currentCompanyId)}
+          searchFields={['conversion_number', 'production_batches.batch_number']}
+          searchPlaceholder="Search job or batch no..."
+          renderRow={(c: any) => (
+            <tr key={c.id} className="hover:bg-primary/5 border-b last:border-none transition-all group">
+              <td className="px-6 py-4 font-mono font-bold text-primary text-xs min-w-[180px] whitespace-nowrap">
+                  {c.conversion_number}
+                  <div className="text-[9px] text-slate-400 font-normal uppercase">{c.shift}</div>
+              </td>
+              <td className="px-6 py-4 text-xs">{new Date(c.date).toLocaleDateString()}</td>
+              <td className="px-6 py-4 font-mono text-xs min-w-[120px]">{c.production_batches?.batch_number}</td>
+              <td className="px-6 py-4">
+                  <div className="flex flex-wrap gap-1">
+                       {c.items?.map((it: any, i: number) => (
+                          <span key={i} className="inline-flex flex-col px-2 py-1 rounded text-[10px] font-medium bg-primary/10 text-primary border border-primary/20">
+                              <span className="font-bold">{it.finished_products?.product_name}</span>
+                              <span className="text-[8px] opacity-70">
+                                {it.quantity}Kg · {it.bags_per_kg} B/Kg · {it.micron_size || 'N/A'} Mic
+                              </span>
+                          </span>
+                      )) || <span className="text-slate-300 text-xs">No items</span>}
+                  </div>
+              </td>
+              <td className="px-6 py-4 text-xs">{c.input_qty}</td>
+              <td className="px-6 py-4 font-bold text-primary">{c.output_qty}</td>
+              <td className="px-6 py-4 text-rose-600 font-bold">{c.wastage_qty}</td>
+              <td className="px-6 py-4 text-xs font-medium text-slate-600">{c.operator?.name}</td>
+              <td className="px-6 py-4 text-right">
+                <div className="flex items-center justify-end gap-2">
+                  {canEdit && (
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => handleEdit(c)}
+                      className="h-8 w-8 rounded-full hover:bg-primary/10 hover:text-primary transition-colors"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                  )}
+                  {canDelete && (
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      onClick={() => handleDelete(c.id)}
+                      className="h-8 w-8 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          )}
+        />
+      )}
+    </div>
+  );
+}
+
+// Helper icons missing or renamed
+const Box = Package;

@@ -1,0 +1,922 @@
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import { usePathname } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { 
+  Plus, Search, Edit, Trash2, X, Save, 
+  Settings, Calendar, Hash, User, 
+  Zap, Box, Layers, Activity, Clock, SquareCheck
+} from 'lucide-react';
+import { TableView } from '@/components/ui/table-view';
+import { useToast } from '@/components/ui/toast';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { useConfirm } from '@/components/ui/confirm-dialog';
+import { usePermission } from '@/hooks/usePermission';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL;
+const BATCH_API = `${API_BASE}/api/maxtron/production/batches`;
+const PRODUCT_API = `${API_BASE}/api/maxtron/products`;
+const EMPLOYEES_API = `${API_BASE}/api/maxtron/employees`;
+
+export default function ExtrusionPage() {
+  const { hasPermission } = usePermission();
+  const canCreate = hasPermission('prod_extrusion_view', 'create');
+  const canEdit = hasPermission('prod_extrusion_view', 'edit');
+  const canDelete = hasPermission('prod_extrusion_view', 'delete');
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [batches, setBatches] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentCompanyId, setCurrentCompanyId] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const { success, error, info } = useToast();
+  const { confirm } = useConfirm();
+  const pathname = usePathname();
+  const activeTenant = pathname?.startsWith('/keil') ? 'KEIL' : 'MAXTRON';
+
+  const [formData, setFormData] = useState<any>({
+    batch_number: `BAT-${Date.now().toString().slice(-6)}`,
+    product_id: '',
+    items: [{ product_id: '', output_qty: 0 }],
+    shift: 'Morning',
+    operator_id: '',
+    supervisor_id: '',
+    machine_no: '',
+    raw_material_consumed_qty: 0,
+    wastage_qty: 0,
+    extrusion_output_qty: 0,
+    date: new Date().toISOString().split('T')[0],
+    company_id: '',
+    consumption_ids: [] as string[],
+    requires_printing: true
+  });
+
+  const [consumptions, setConsumptions] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
+
+  const fetchInitialData = async () => {
+    setLoading(true);
+    const token = localStorage.getItem('token');
+    try {
+      console.log('Fetching extrusion initial data...');
+      const compRes = await fetch(`${API_BASE}/api/maxtron/companies`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const compData = await compRes.json();
+      
+      let coId = '';
+      if (compData.success && Array.isArray(compData.data)) {
+        const activeCo = compData.data.find((c: any) => 
+          c.company_name?.toUpperCase() === activeTenant || 
+          c.company_name?.toUpperCase().includes(activeTenant)
+        );
+        if (activeCo) {
+          coId = activeCo.id;
+          setCurrentCompanyId(coId);
+          setFormData((prev: any) => ({ ...prev, company_id: coId }));
+          console.log(`Matched company: ${activeCo.company_name} (${coId})`);
+        }
+      }
+
+      const [prodRes, empRes, conRes] = await Promise.all([
+        fetch(`${PRODUCT_API}${coId ? `?company_id=${coId}` : ''}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${EMPLOYEES_API}`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/maxtron/consumptions${coId ? `?company_id=${coId}` : ''}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      ]);
+      
+      const prodData = await prodRes.json();
+      const empData = await empRes.json();
+      const conData = await conRes.json();
+      
+      if (prodData.success) setProducts(prodData.data);
+      if (conData.success) {
+        setConsumptions(conData.data);
+      }
+      
+      if (empData.success && Array.isArray(empData.data)) {
+        const filtered = empData.data.filter((e: any) => 
+          (e.companies?.company_name?.toUpperCase() === activeTenant ||
+          e.companies?.company_name?.toUpperCase().includes(activeTenant)) &&
+          e.user_types?.name?.toLowerCase() !== 'admin' &&
+          e.username?.toLowerCase() !== 'admin@maxtron.com'
+        );
+        setEmployees(filtered);
+      }
+
+      if (coId) await fetchBatches(coId);
+      else setLoading(false);
+      
+    } catch (err) {
+      console.error('Error fetching initial data:', err);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showForm && !editingId && !loading) {
+       const currentNo = formData.batch_number;
+       if (!currentNo || (currentNo.includes('BAT-') && currentNo.length < 10) || currentNo === 'GENERATING...') {
+          resetForm(batches);
+       }
+    }
+  }, [batches, showForm, editingId, loading]);
+
+  const handleToggleConsumption = (id: string) => {
+    const currentIds = formData.consumption_ids || [];
+    const isSelected = currentIds.includes(id);
+    let newIds: string[];
+    if (isSelected) {
+      newIds = currentIds.filter((cid: string) => cid !== id);
+    } else {
+      newIds = [...currentIds, id];
+    }
+
+    const selectedConsumptions = consumptions.filter((c: any) => newIds.includes(c.id));
+    const totalQty = selectedConsumptions.reduce((sum: number, c: any) => sum + (Number(c.quantity_used) || 0), 0);
+
+    const firstConsumption = selectedConsumptions[0];
+    setFormData({
+      ...formData,
+      consumption_ids: newIds,
+      raw_material_consumed_qty: totalQty,
+      machine_no: firstConsumption?.machine_no || formData.machine_no,
+      operator_id: firstConsumption?.issued_by || formData.operator_id
+    });
+  };
+
+  const addItem = () => {
+    setFormData((prev: any) => ({
+      ...prev,
+      items: [...(prev.items || []), { product_id: '', output_qty: 0 }]
+    }));
+  };
+
+  const handleWastageChange = (val: string) => {
+    const wasteNum = parseFloat(val) || 0;
+    const grossOutput = (formData.items || []).reduce((sum: number, it: any) => sum + (Number(it.output_qty) || 0), 0);
+    const netOutput = Math.max(0, Number((grossOutput - wasteNum).toFixed(2)));
+    setFormData({
+      ...formData,
+      wastage_qty: val === '' ? '' : wasteNum,
+      extrusion_output_qty: netOutput
+    });
+  };
+
+  const removeItem = (index: number) => {
+    const newItems = [...(formData.items || [])];
+    newItems.splice(index, 1);
+    const grossOutput = newItems.reduce((sum: number, it: any) => sum + (Number(it.output_qty) || 0), 0);
+    const wasteNum = Number(formData.wastage_qty) || 0;
+    const netOutput = Math.max(0, Number((grossOutput - wasteNum).toFixed(2)));
+
+    const reqPrinting = newItems.some((it: any) => {
+      const p = products.find(prod => prod.id === it.product_id);
+      const color = (p?.color || '').toUpperCase();
+      return !(color === 'BLACK' || color === 'GREEN');
+    });
+
+    setFormData({
+      ...formData,
+      items: newItems,
+      extrusion_output_qty: netOutput,
+      product_id: newItems[0]?.product_id || '',
+      requires_printing: newItems.length > 0 ? reqPrinting : formData.requires_printing
+    });
+  };
+
+  const handleItemChange = (index: number, field: string, value: any) => {
+    const newItems = [...(formData.items || [])];
+    newItems[index] = { ...newItems[index], [field]: value };
+
+    const grossOutput = newItems.reduce((sum: number, it: any) => sum + (Number(it.output_qty) || 0), 0);
+    const wasteNum = Number(formData.wastage_qty) || 0;
+    const netOutput = Math.max(0, Number((grossOutput - wasteNum).toFixed(2)));
+
+    const reqPrinting = newItems.some((it: any) => {
+      const p = products.find(prod => prod.id === it.product_id);
+      const color = (p?.color || '').toUpperCase();
+      return !(color === 'BLACK' || color === 'GREEN');
+    });
+
+    setFormData({
+      ...formData,
+      items: newItems,
+      extrusion_output_qty: netOutput,
+      product_id: newItems[0]?.product_id || '',
+      requires_printing: reqPrinting
+    });
+  };
+
+  const fetchBatches = async (coId?: string) => {
+    const token = localStorage.getItem('token');
+    const targetCoId = coId || currentCompanyId;
+    if (!targetCoId) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BATCH_API}?company_id=${targetCoId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        const sorted = (data.data || []).sort((a: any, b: any) => 
+            new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        setBatches(sorted);
+      }
+    } catch (err) {
+      console.error('Error fetching batches:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetForm = (latestBatches: any[] = batches) => {
+    if (loading && latestBatches.length === 0) {
+        setFormData((prev: any) => ({ ...prev, batch_number: 'GENERATING...' }));
+        return;
+    }
+
+    let nextBatchNo = 'BAT-000001';
+    const validBatches = latestBatches
+      .filter(b => b.batch_number && /^BAT-\d+$/i.test(b.batch_number))
+      .map(b => {
+        const parts = b.batch_number.split('-');
+        return parts.length > 1 ? parseInt(parts[1], 10) : 0;
+      })
+      .filter(n => !isNaN(n));
+
+    if (validBatches.length > 0) {
+      const max = Math.max(...validBatches);
+      nextBatchNo = `BAT-${String(max + 1).padStart(6, '0')}`;
+    }
+
+    setFormData({
+      batch_number: nextBatchNo,
+      product_id: '',
+      items: [{ product_id: '', output_qty: 0 }],
+      shift: 'Morning',
+      operator_id: '',
+      supervisor_id: '',
+      machine_no: '',
+      raw_material_consumed_qty: 0,
+      wastage_qty: 0,
+      extrusion_output_qty: 0,
+      date: new Date().toISOString().split('T')[0],
+      company_id: currentCompanyId,
+      consumption_ids: [],
+      requires_printing: true
+    });
+  };
+
+  const handleEdit = (b: any) => {
+    setEditingId(b.id);
+    const existingItems = Array.isArray(b.items) && b.items.length > 0
+      ? b.items.map((i: any) => ({ product_id: i.product_id, output_qty: Number(i.output_qty) || 0 }))
+      : [{ product_id: b.product_id || '', output_qty: Number(b.extrusion_output_qty) || 0 }];
+
+    setFormData({
+      batch_number: b.batch_number,
+      product_id: b.product_id || existingItems[0]?.product_id || '',
+      items: existingItems,
+      shift: b.shift,
+      operator_id: b.operator_id,
+      supervisor_id: b.supervisor_id,
+      machine_no: b.machine_no,
+      raw_material_consumed_qty: b.raw_material_consumed_qty,
+      wastage_qty: b.wastage_qty ?? 0,
+      extrusion_output_qty: b.extrusion_output_qty,
+      date: b.date.split('T')[0],
+      company_id: b.company_id,
+      consumption_ids: Array.isArray(b.material_consumptions)
+        ? b.material_consumptions.map((c: any) => c.id)
+        : b.consumption_id ? [b.consumption_id] : [],
+      requires_printing: b.requires_printing ?? true
+    });
+    setShowForm(true);
+  };
+
+  const handleDelete = async (id: string) => {
+    const isConfirmed = await confirm({
+      message: 'Are you sure you want to delete this production batch? This action cannot be undone.',
+      type: 'danger'
+    });
+
+    if (!isConfirmed) return;
+
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${BATCH_API}/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        success('Batch deleted successfully');
+        fetchBatches();
+      } else {
+        error(data.message);
+      }
+    } catch (err) {
+      error('Error deleting batch');
+    }
+  };
+
+  const saveBatch = async () => {
+    const requiredFields = [
+      { field: 'date', label: 'Production Date' },
+      { field: 'shift', label: 'Shift' },
+      { field: 'machine_no', label: 'Machine Number' },
+      { field: 'operator_id', label: 'Employee' }
+    ];
+
+    for (const { field, label } of requiredFields) {
+      if (!formData[field]) {
+        error(`${label} is required.`);
+        return;
+      }
+    }
+
+    if (!formData.items || formData.items.length === 0 || formData.items.some((it: any) => !it.product_id)) {
+      error("Please select at least one Finished Product.");
+      return;
+    }
+
+    if (formData.items.some((it: any) => Number(it.output_qty) <= 0)) {
+      error("Output quantity for each finished product must be greater than zero.");
+      return;
+    }
+
+    if (!formData.consumption_ids || formData.consumption_ids.length === 0) {
+      error("At least one Consumption Record is required.");
+      return;
+    }
+
+    const machineRegex = /^[a-zA-Z0-9\-_ ]+$/;
+    if (!machineRegex.test(formData.machine_no)) {
+      error('Machine No contains invalid characters. Use only letters, numbers, dashes, or underscores.');
+      return;
+    }
+
+    if (formData.raw_material_consumed_qty <= 0) {
+      error('Raw material consumed quantity must be greater than zero.');
+      return;
+    }
+
+    const grossOutput = (formData.items || []).reduce((sum: number, it: any) => sum + (Number(it.output_qty) || 0), 0);
+    const wasteQty = Number(formData.wastage_qty) || 0;
+
+    if (wasteQty < 0) {
+      error("Wastage quantity cannot be negative.");
+      return;
+    }
+
+    if (wasteQty > grossOutput) {
+      error(`Wastage quantity (${wasteQty} Kg) cannot exceed total finished product output (${grossOutput} Kg).`);
+      return;
+    }
+
+    const netOutput = Math.max(0, Number((grossOutput - wasteQty).toFixed(2)));
+
+    const token = localStorage.getItem('token');
+    const method = editingId ? 'PUT' : 'POST';
+    const url = editingId ? `${BATCH_API}/${editingId}` : BATCH_API;
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ...formData,
+          wastage_qty: wasteQty,
+          extrusion_output_qty: netOutput,
+          product_id: formData.items[0]?.product_id || formData.product_id,
+          supervisor_id: formData.supervisor_id === 'none' ? '' : formData.supervisor_id
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        success(editingId ? 'Production batch updated' : 'Production batch recorded');
+        setShowForm(false);
+        setEditingId(null);
+        fetchBatches();
+        resetForm();
+      } else {
+        error(data.message);
+      }
+    } catch (err) {
+      error('Error saving batch');
+    }
+  };
+
+  const operators = useMemo(() => {
+    const op = employees.filter(e => {
+      const role = (e.user_types?.name || '').toLowerCase();
+      const cat = (e.employee_categories?.category_name || '').toLowerCase();
+      return role.includes('operator') || cat.includes('operator') || role.includes('worker') || cat.includes('worker') || role.includes('production') || cat.includes('production');
+    });
+    return op.length > 0 ? op : employees;
+  }, [employees]);
+
+  const supervisors = useMemo(() => {
+    const sup = employees.filter(e => {
+      const role = (e.user_types?.name || '').toLowerCase();
+      const cat = (e.employee_categories?.category_name || '').toLowerCase();
+      return role.includes('supervisor') || cat.includes('supervisor') || role.includes('manager') || cat.includes('manager') || role.includes('lead') || cat.includes('lead');
+    });
+    return sup.length > 0 ? sup : employees;
+  }, [employees]);
+
+  const availableConsumptions = useMemo(() => {
+    const usedConsumptionIds = batches.flatMap(b => {
+      if (editingId && b.id === editingId) return [];
+      if (b.consumption_ids && Array.isArray(b.consumption_ids)) {
+        return b.consumption_ids;
+      }
+      return b.consumption_id ? [b.consumption_id] : [];
+    }).filter(id => !!id);
+
+    return consumptions.filter(c => 
+        !usedConsumptionIds.includes(c.id) || (formData.consumption_ids || []).includes(c.id)
+    );
+  }, [consumptions, batches, formData.consumption_ids, editingId]);
+
+  const filteredBatches = batches.filter(b => {
+    const q = searchQuery.toLowerCase();
+    const batchNoMatch = b.batch_number?.toLowerCase().includes(q);
+    const prodMatch = b.finished_products?.product_name?.toLowerCase().includes(q) ||
+      (b.items && b.items.some((it: any) => it.finished_products?.product_name?.toLowerCase().includes(q)));
+    return batchNoMatch || prodMatch;
+  });
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-700">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 md:p-6 rounded-xl shadow-sm border border-primary/10">
+        <div className="space-y-1">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+            <Zap className="w-8 h-8 md:w-10 md:h-10 text-primary shrink-0" /> <span className="truncate text-primary">Production (Extrusion)</span>
+          </h1>
+          <p className="text-muted-foreground text-xs md:text-sm font-medium">Record extrusion output by shift and operator.</p>
+        </div>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          {!showForm && canCreate && (
+            <Button 
+              onClick={() => {
+                setEditingId(null);
+                resetForm();
+                setShowForm(true);
+              }} 
+              className="bg-primary hover:bg-primary/95 text-white px-6 rounded-full shadow-lg shadow-primary/20 h-10 md:h-11 transition-all hover:scale-105 active:scale-95 w-full md:w-auto flex-1 md:flex-none"
+            >
+              <Plus className="w-4 h-4 mr-2" /> Record New Batch
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {showForm && (
+        <Card className="border-primary/20 shadow-lg animate-in slide-in-from-top duration-500 overflow-hidden">
+          <CardHeader className="bg-primary/5 border-b border-primary/10 py-4">
+            <CardTitle className="text-xl flex items-center gap-2">
+              <Zap className="w-5 h-5 text-primary" /> {editingId ? 'Edit Production Batch' : 'New Production Batch'}
+            </CardTitle>
+            <CardDescription>{editingId ? 'Update details for the existing batch.' : 'Enter extrusion output and machine details for the current shift.'}</CardDescription>
+          </CardHeader>
+          <CardContent className="p-6 space-y-6">
+            {/* Row 1: Batch Number & Production Date */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80"><Hash className="w-4 h-4 text-primary" /> Batch Number</label>
+                <Input value={formData.batch_number} readOnly className="h-11 bg-muted cursor-not-allowed font-bold" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                  <Calendar className="w-4 h-4 text-primary" /> Production Date <span className="text-rose-500">*</span>
+                </label>
+                <Input type="date" className="h-11 font-bold" value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                   <Clock className="w-4 h-4 text-primary" /> Shift <span className="text-rose-500">*</span>
+                </label>
+                <Input 
+                  placeholder="e.g. Morning, General, Shift A..." 
+                  className="h-11 font-bold"
+                  value={formData.shift} 
+                  onChange={e => setFormData({ ...formData, shift: e.target.value })} 
+                />
+              </div>
+            </div>
+
+            {/* Finished Products Section (Multiple Products Supported) */}
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                  <Box className="w-4 h-4 text-primary" /> Finished Products Produced (Multiple Products) <span className="text-rose-500">*</span>
+                </label>
+                <Button
+                  type="button"
+                  onClick={addItem}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 px-3 text-xs font-bold text-primary border-primary/30 hover:bg-primary/5 rounded-lg flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Finished Product
+                </Button>
+              </div>
+
+              <div className="border border-input rounded-xl overflow-hidden shadow-xs bg-white">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-primary/5 text-slate-700 font-bold border-b border-primary/10">
+                    <tr>
+                      <th className="px-4 py-2.5 w-12 text-center">#</th>
+                      <th className="px-4 py-2.5">Finished Product *</th>
+                      <th className="px-4 py-2.5 text-right w-44">Output Qty (Kg) *</th>
+                      <th className="px-4 py-2.5 text-center w-16">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(formData.items || []).map((item: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-center font-semibold text-slate-400">{idx + 1}</td>
+                        <td className="px-4 py-3">
+                          <Select 
+                            value={item.product_id} 
+                            onValueChange={(val) => handleItemChange(idx, 'product_id', val)}
+                          >
+                            <SelectTrigger className="h-9 w-full border-input bg-background shadow-xs font-bold text-xs">
+                              <SelectValue placeholder="Choose Finished Product..." />
+                            </SelectTrigger>
+                            <SelectContent className="bg-white border-input">
+                              {products.map(p => (
+                                <SelectItem key={p.id} value={p.id}>{p.product_name} ({p.product_code})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Input 
+                            type="number"
+                            min={0.01}
+                            step="0.01"
+                            placeholder="0.00"
+                            className="h-9 text-right font-bold text-primary text-xs"
+                            value={item.output_qty === 0 ? '' : item.output_qty}
+                            onChange={e => handleItemChange(idx, 'output_qty', parseFloat(e.target.value) || 0)}
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={formData.items.length === 1}
+                            onClick={() => removeItem(idx)}
+                            className="h-8 w-8 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer disabled:opacity-30"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Row 2: Machine & Printing Toggle */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2 border-t">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                  <Settings className="w-4 h-4 text-primary" /> Machine No <span className="text-rose-500">*</span>
+                </label>
+                <Input 
+                  placeholder="e.g. EX-01" 
+                  className="h-11 font-bold"
+                  value={formData.machine_no} 
+                  onChange={e => {
+                    const val = e.target.value.replace(/[^a-zA-Z0-9\-_ ]/g, '').toUpperCase();
+                    setFormData({ ...formData, machine_no: val });
+                  }} 
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                    <SquareCheck className="w-4 h-4 text-primary" /> Printing Requirement
+                </label>
+                <div className="flex items-center gap-3 bg-slate-50 px-4 rounded-md border border-slate-200 h-11 w-full">
+                  <input 
+                    type="checkbox" 
+                    id="requires_printing"
+                    className="w-4 h-4 accent-primary cursor-pointer"
+                    checked={formData.requires_printing}
+                    onChange={e => setFormData({ ...formData, requires_printing: e.target.checked })}
+                  />
+                  <label htmlFor="requires_printing" className="text-xs font-bold text-slate-700 cursor-pointer select-none">
+                    Requires Printing Process?
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Row 3: Material Consumptions */}
+            <div className="space-y-2">
+              <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                 <Layers className="w-4 h-4 text-primary" /> Select Consumption Records (Multiple) <span className="text-rose-500">*</span>
+              </label>
+              <div className="border border-input rounded-xl p-3 bg-white max-h-48 overflow-y-auto space-y-2 shadow-sm">
+                {availableConsumptions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2 text-center">No unused consumption records available.</p>
+                ) : (
+                  availableConsumptions.map(c => {
+                    const isChecked = (formData.consumption_ids || []).includes(c.id);
+                    return (
+                      <div 
+                        key={c.id} 
+                        onClick={() => handleToggleConsumption(c.id)}
+                        className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all hover:bg-slate-50 ${
+                          isChecked ? 'border-primary bg-primary/5' : 'border-slate-100'
+                        }`}
+                      >
+                        <input 
+                          type="checkbox" 
+                          className="w-4 h-4 accent-primary" 
+                          checked={isChecked}
+                          onChange={() => {}} 
+                        />
+                        <div className="flex-1 text-xs">
+                          <span className="font-bold text-slate-800">{c.raw_materials?.rm_name}</span>
+                          <span className="mx-2 text-slate-400">|</span>
+                          <span className="font-mono font-bold text-primary">{c.quantity_used} Kg</span>
+                          <span className="mx-2 text-slate-400">|</span>
+                          <span className="text-slate-500">{new Date(c.consumption_date).toLocaleDateString()}</span>
+                          {c.machine_no && (
+                            <>
+                              <span className="mx-2 text-slate-400">|</span>
+                              <span className="text-slate-500 font-semibold bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{c.machine_no}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Row 4: Personnel & Yield Quantities */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6 pt-2 border-t">
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                   <User className="w-4 h-4 text-primary" /> Operator <span className="text-rose-500">*</span>
+                </label>
+                <Select value={formData.operator_id} onValueChange={(val) => setFormData({ ...formData, operator_id: val })}>
+                  <SelectTrigger className="h-11 w-full border-input bg-background shadow-sm font-bold">
+                    <SelectValue placeholder="Select Operator" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-input">
+                    {operators.map(e => (
+                      <SelectItem key={e.id} value={e.id}>{e.name} ({e.employee_code || e.user_types?.name || 'Operator'})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                   <User className="w-4 h-4 text-primary" /> Supervisor
+                </label>
+                <Select value={formData.supervisor_id || 'none'} onValueChange={(val) => setFormData({ ...formData, supervisor_id: val })}>
+                  <SelectTrigger className="h-11 w-full border-input bg-background shadow-sm font-bold">
+                    <SelectValue placeholder="Select Supervisor" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-input">
+                    <SelectItem value="none">Select Supervisor</SelectItem>
+                    {supervisors.map(e => (
+                      <SelectItem key={e.id} value={e.id}>{e.name} ({e.employee_code || e.user_types?.name || 'Supervisor'})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                  <Layers className="w-4 h-4 text-primary" /> RM Consumed (Kg)
+                </label>
+                <Input type="number" readOnly className="h-11 bg-muted cursor-not-allowed font-bold" value={formData.raw_material_consumed_qty} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-rose-600">
+                  <Trash2 className="w-4 h-4 text-rose-500" /> Wastage (Kg)
+                </label>
+                <Input 
+                  type="number" 
+                  min={0}
+                  step="0.01"
+                  placeholder="0.00" 
+                  className="h-11 font-bold text-rose-600 border-rose-200 focus-visible:ring-rose-500 bg-rose-50/30"
+                  value={formData.wastage_qty === 0 ? '' : formData.wastage_qty} 
+                  onChange={e => handleWastageChange(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground/80">
+                  <Activity className="w-4 h-4 text-emerald-600" /> Total Output (Kg) <span className="text-rose-500">*</span>
+                </label>
+                <Input 
+                  type="number" 
+                  readOnly
+                  placeholder="0.00" 
+                  className="h-11 bg-muted cursor-not-allowed font-black text-emerald-700"
+                  value={formData.extrusion_output_qty} 
+                />
+              </div>
+            </div>
+
+            <div className="mt-8 flex flex-col md:flex-row justify-end gap-3 border-t pt-6 px-4 md:px-0">
+               <div className="mr-auto hidden md:flex items-center gap-4">
+                  <div className="flex flex-col">
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">Total RM Input</span>
+                     <span className="text-xl font-black text-primary">{formData.raw_material_consumed_qty} Kg</span>
+                  </div>
+                  <div className="w-[1px] h-8 bg-slate-200"></div>
+                  <div className="flex flex-col">
+                     <span className="text-[10px] font-black text-rose-500 uppercase tracking-widest text-left">Wastage Loss</span>
+                     <span className="text-xl font-black text-rose-600">{Number(formData.wastage_qty || 0).toFixed(2)} Kg</span>
+                  </div>
+                  <div className="w-[1px] h-8 bg-slate-200"></div>
+                  <div className="flex flex-col">
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">Net Output</span>
+                     <span className="text-xl font-black text-emerald-600">{Number(formData.extrusion_output_qty || 0).toFixed(2)} Kg</span>
+                  </div>
+                  <div className="w-[1px] h-8 bg-slate-200"></div>
+                  <div className="flex flex-col">
+                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">Recovery %</span>
+                     <span className="text-xl font-black text-emerald-600">
+                         {formData.raw_material_consumed_qty > 0 
+                             ? ((formData.extrusion_output_qty / formData.raw_material_consumed_qty) * 100).toFixed(1) 
+                             : '0.0'}%
+                     </span>
+                  </div>
+               </div>
+               
+               <Button 
+                 variant="outline" 
+                 onClick={() => setShowForm(false)} 
+                 className="flex-1 md:flex-none px-8 rounded-full h-11 font-bold order-2 md:order-1"
+               >
+                 Cancel Entry
+               </Button>
+               <Button 
+                 onClick={saveBatch} 
+                 className="flex-1 md:flex-none bg-primary hover:bg-primary/95 text-white px-10 rounded-full shadow-lg shadow-primary/20 h-11 transition-all hover:scale-105 active:scale-95 order-1 md:order-2 font-bold"
+               >
+                 <Save className="w-4 h-4 mr-2" /> Save Batch Entry
+               </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!showForm && (
+        <TableView
+          title="Batch History"
+          description="History of production batches and machine assignments."
+          headers={['Date', 'Batch #', 'Finished Products Produced', 'Shift', 'Machine', 'Material Used', 'Wastage', 'Total Output', 'Operator', 'Actions']}
+          data={filteredBatches}
+          loading={loading}
+          deleteUrl={BATCH_API}
+          onRefresh={() => fetchBatches(currentCompanyId)}
+          searchFields={['batch_number', 'finished_products.product_name']}
+          searchPlaceholder="Search batches or products..."
+          renderRow={(b: any) => {
+            const product = Array.isArray(b.finished_products) ? b.finished_products[0] : b.finished_products;
+            const operator = Array.isArray(b.operator) ? b.operator[0] : b.operator;
+            
+            return (
+              <tr key={b.id} className="hover:bg-primary/5 border-b last:border-none transition-all group">
+                <td className="px-6 py-4 text-xs font-medium text-muted-foreground">{new Date(b.date).toLocaleDateString()}</td>
+                <td className="px-6 py-4 font-mono font-bold text-foreground/80">{b.batch_number}</td>
+                <td className="px-6 py-4">
+                  <div className="flex flex-col gap-1 max-w-[220px]">
+                    {b.items && b.items.length > 0 ? (
+                      b.items.map((it: any, idx: number) => (
+                        <div key={idx} className="flex flex-col bg-slate-50 p-1.5 rounded border border-slate-100 text-xs">
+                          <span className="font-bold text-primary">{it.finished_products?.product_name || 'N/A'}</span>
+                          <span className="text-[10px] text-slate-600 font-mono font-black">{it.output_qty} Kg</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex flex-col">
+                        <span className="font-bold text-primary">{product?.product_name || 'N/A'}</span>
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-tight">{product?.product_code || ''}</span>
+                      </div>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold w-fit uppercase border">
+                      <Clock className="w-3 h-3 text-slate-400" /> {b.shift}
+                    </div>
+                </td>
+                <td className="px-6 py-4 text-xs font-semibold text-foreground/60">{b.machine_no}</td>
+                <td className="px-6 py-4">
+                  <div className="flex flex-col gap-1 max-w-[200px]">
+                    {b.material_consumptions && b.material_consumptions.length > 0 ? (
+                      b.material_consumptions.map((mc: any, idx: number) => (
+                        <div key={idx} className="flex flex-col bg-slate-50 p-1.5 rounded border border-slate-100 text-xs">
+                          <span className="font-bold text-primary">{mc.raw_materials?.rm_name || 'N/A'}</span>
+                          <span className="text-[10px] text-slate-600 font-mono font-black">{mc.quantity_used} Kg</span>
+                        </div>
+                      ))
+                    ) : b.material_consumptions?.raw_materials?.rm_name ? (
+                      <div className="flex flex-col bg-slate-50 p-1.5 rounded border border-slate-100 text-xs">
+                         <span className="font-bold text-primary">{b.material_consumptions.raw_materials.rm_name}</span>
+                         <span className="text-[10px] text-slate-600 font-mono font-black">{b.material_consumptions.quantity_used} Kg</span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400 italic text-xs">N/A</span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-6 py-4">
+                  {Number(b.wastage_qty) > 0 ? (
+                    <div className="flex flex-col">
+                      <span className="font-bold text-sm text-rose-600 font-mono">
+                        {Number(b.wastage_qty).toFixed(2)} Kg
+                      </span>
+                      <span className="text-[9px] font-bold text-rose-500 uppercase tracking-tight">Wastage Loss</span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-400 font-mono">0.00 Kg</span>
+                  )}
+                </td>
+                <td className="px-6 py-4">
+                    <div className="flex flex-col items-end sm:items-start">
+                      <span className="font-black text-base text-emerald-700">{b.extrusion_output_qty} Kg</span>
+                      <span className="text-[10px] text-muted-foreground font-medium">RM: {b.raw_material_consumed_qty} Kg</span>
+                    </div>
+                </td>
+                <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">
+                        {operator?.name?.charAt(0) || '?'}
+                      </div>
+                      <span className="text-xs font-medium">{operator?.name || 'Unknown'}</span>
+                    </div>
+                </td>
+                <td className="px-3 py-4 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    {canEdit && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        onClick={() => handleEdit(b)}
+                        className="h-8 w-8 rounded-full hover:bg-primary/10 hover:text-primary transition-colors"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        onClick={() => handleDelete(b.id)}
+                        className="h-8 w-8 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          }}
+        />
+      )}
+    </div>
+  );
+}
