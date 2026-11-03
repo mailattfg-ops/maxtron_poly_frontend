@@ -890,7 +890,40 @@ export default function SalesInvoiceEntry() {
     }
   };
 
-  const handleEdit = (inv: any) => {
+  // The invoice list leaves attached bills out (each is a whole file); load one when needed.
+  const loadBillDocument = async (inv: any): Promise<{ bill_document_url: string; bill_document_name: string }> => {
+    if (!inv.has_bill_document) return { bill_document_url: '', bill_document_name: inv.bill_document_name || '' };
+    const res = await fetch(`${INVOICES_API}/${inv.id}/bill-document`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || 'Could not load the attached bill');
+    return data.data;
+  };
+
+  const viewBillDocument = async (inv: any) => {
+    try {
+      const bill = await loadBillDocument(inv);
+      setViewingBillDoc({
+        url: bill.bill_document_url,
+        name: bill.bill_document_name || `Bill_${inv.invoice_number}`,
+        invoiceNumber: inv.invoice_number,
+        software: inv.billing_software
+      });
+    } catch (e: any) {
+      error(e.message);
+    }
+  };
+
+  const handleEdit = async (inv: any) => {
+    // Load the attached bill first: saving the form without it would remove it.
+    let bill;
+    try {
+      bill = await loadBillDocument(inv);
+    } catch (e: any) {
+      error(e.message);
+      return;
+    }
     const cust = customers.find(c => c.id === inv.customer_id);
     const resolvedType = inv.invoice_type || (cust?.gst_no ? 'B2B' : 'B2C');
     setEditingId(inv.id);
@@ -916,8 +949,8 @@ export default function SalesInvoiceEntry() {
       trans_doc_date: inv.trans_doc_date ? inv.trans_doc_date.split('T')[0] : '',
       is_external: Boolean(inv.is_external),
       billing_software: inv.billing_software || 'Tally',
-      bill_document_url: inv.bill_document_url || '',
-      bill_document_name: inv.bill_document_name || '',
+      bill_document_url: bill.bill_document_url || '',
+      bill_document_name: bill.bill_document_name || '',
       items: inv.items.map((i: any) => {
         const qty = Number(i.quantity) || 0;
         const rate = Number(i.rate) || 0;
@@ -1547,8 +1580,9 @@ export default function SalesInvoiceEntry() {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              if (file.size > 15 * 1024 * 1024) {
-                                error('File size exceeds 15MB limit.');
+                              // Sent as base64 (+33%) inside the save request; Vercel rejects bodies over 4.5MB.
+                              if (file.size > 3 * 1024 * 1024) {
+                                error('File size exceeds 3MB limit.');
                                 return;
                               }
                               const reader = new FileReader();
@@ -2245,17 +2279,12 @@ export default function SalesInvoiceEntry() {
                         })()}
                       </div>
 
-                      {inv.bill_document_url ? (
+                      {inv.has_bill_document ? (
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => setViewingBillDoc({
-                            url: inv.bill_document_url,
-                            name: inv.bill_document_name || `Bill_${inv.invoice_number}`,
-                            invoiceNumber: inv.invoice_number,
-                            software: inv.billing_software
-                          })}
+                          onClick={() => viewBillDocument(inv)}
                           className="h-8 text-[11px] font-bold border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 rounded-lg flex items-center gap-1.5 px-2.5 shadow-sm"
                           title={`View ${inv.billing_software || 'External'} Bill Copy (${inv.bill_document_name || 'Attached'})`}
                         >
