@@ -112,7 +112,7 @@ export default function RawMaterialPage() {
     }
   }, [materials, showForm, editingId, loading]);
 
-  const fetchMaterials = async (coId?: string) => {
+  const fetchMaterials = async (coId?: string): Promise<any[] | undefined> => {
     const token = localStorage.getItem('token');
     const targetCoId = coId || currentCompanyId;
     try {
@@ -126,6 +126,7 @@ export default function RawMaterialPage() {
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
         setMaterials(sorted);
+        return sorted;
       }
     } catch (err) {
       console.error('Error fetching materials:', err);
@@ -202,8 +203,8 @@ export default function RawMaterialPage() {
         success(editingId ? 'Material updated!' : 'Material added!');
         setShowForm(false);
         setEditingId(null);
-        fetchMaterials();
-        resetForm();
+        // Next code from the list that includes this save, not the list before it
+        resetForm(await fetchMaterials() || materials);
       } else {
         error(data.error || data.message || 'Error occurred');
       }

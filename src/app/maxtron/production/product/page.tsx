@@ -104,7 +104,7 @@ export default function FinishedProductPage() {
     }
   }, [products, showForm, editingId, loading]);
 
-  const fetchProducts = async (coId?: string) => {
+  const fetchProducts = async (coId?: string): Promise<any[] | undefined> => {
     const token = localStorage.getItem('token');
     const targetCoId = coId || currentCompanyId;
     try {
@@ -118,6 +118,7 @@ export default function FinishedProductPage() {
             new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
         );
         setProducts(sorted);
+        return sorted;
       }
     } catch (err) {
       console.error('Error fetching products:', err);
@@ -153,8 +154,8 @@ export default function FinishedProductPage() {
         success(editingId ? 'Product updated' : 'Product created');
         setEditingId(null);
         setShowForm(false);
-        resetForm();
-        fetchProducts();
+        // Next code from the list that includes this save, not the list before it
+        resetForm(await fetchProducts() || products);
       } else {
         error(data.message || 'Operation failed');
       }
