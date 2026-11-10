@@ -225,7 +225,7 @@ export default function EmployeeCategoriesPage() {
             {!showForm && (
                 <TableView
                     title="Available Classifications"
-                    description="Standard groupings used across both Maxtron and Keil operations."
+                    description="Standard groupings used in Maxtron Polymers operations."
                     headers={['Classification Name', 'System Key', 'Actions']}
                     data={categories}
                     loading={loading}
