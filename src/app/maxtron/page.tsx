@@ -153,7 +153,7 @@ export default function Dashboard() {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-4xl font-black text-foreground tracking-tight">Enterprise Overview</h1>
-                    <p className="text-muted-foreground font-medium mt-1">Real-time analytical baseline for Maxtron Operations.</p>
+                    <p className="text-muted-foreground font-medium mt-1">Real-time analytical baseline for Maxtron Polymers Operations.</p>
                 </div>
                 <div className="flex items-center gap-3">
                     {/* <div className="px-4 py-2 bg-card rounded-2xl border border-border shadow-sm flex items-center gap-2">

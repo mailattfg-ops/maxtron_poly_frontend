@@ -356,7 +356,7 @@ export default function MiscellaneousExpensesReport() {
                 This report excludes all Petty Cash transactions and strictly focuses on categorized production and general miscellaneous expenses.
             </p>
             <p className="text-[10px] text-slate-400 uppercase tracking-widest">
-                Generated internally by Maxtron ERP System • {new Date().toLocaleString()}
+                Generated internally by Maxtron Polymers ERP System • {new Date().toLocaleString()}
             </p>
       </div>
 

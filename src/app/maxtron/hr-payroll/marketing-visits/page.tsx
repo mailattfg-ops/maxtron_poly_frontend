@@ -2364,7 +2364,7 @@ export default function MarketingVisitsPage() {
                                     variant="outline"
                                     onClick={() => downloadQuotationPdf(rec)}
                                     className="h-6 text-[9px] font-bold border-rose-300 text-rose-800 bg-rose-50/70 hover:bg-rose-100 px-2 rounded flex items-center gap-1 shadow-sm"
-                                    title="Download quotation as PDF, in the Maxtron quotation format"
+                                    title="Download quotation as PDF, in the Maxtron Polymers quotation format"
                                   >
                                     <Download className="w-3 h-3 text-rose-600" /> PDF
                                   </Button>
@@ -2438,7 +2438,7 @@ export default function MarketingVisitsPage() {
                 {selectedOffer?.description || 'No additional details provided for this announcement.'}
              </p>
              <div className="mt-8 pt-6 border-t border-slate-100 flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase">
-                <span>Maxtron Operations</span>
+                <span>Maxtron Polymers Operations</span>
                 <span className="flex items-center gap-1.5"><Star className="w-3 h-3 text-primary fill-primary" /> Verified Announcement</span>
              </div>
           </div>

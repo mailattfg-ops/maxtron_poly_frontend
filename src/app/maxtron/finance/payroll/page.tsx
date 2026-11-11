@@ -340,7 +340,7 @@ export default function PayrollPage() {
 
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        saveAs(blob, `maxtron_payroll_report_${months[filterMonth - 1]}_${filterYear}.xlsx`);
+        saveAs(blob, `maxtron_polymers_payroll_report_${months[filterMonth - 1]}_${filterYear}.xlsx`);
         success('Payroll report exported successfully.');
     };
 
@@ -397,7 +397,7 @@ export default function PayrollPage() {
 
         const buffer = await workbook.xlsx.writeBuffer();
         const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-        saveAs(blob, `maxtron_payroll_import_template_${filterMonth}_${filterYear}.xlsx`);
+        saveAs(blob, `maxtron_polymers_payroll_import_template_${filterMonth}_${filterYear}.xlsx`);
         success('Sample Excel import template downloaded successfully.');
     };
 

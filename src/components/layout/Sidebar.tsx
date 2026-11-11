@@ -57,7 +57,7 @@ export const Sidebar = ({
               M
             </div>
             <h1 className="text-xl font-bold tracking-wider">
-              Maxtron
+              Maxtron Polymers
             </h1>
           </div>
           <button
@@ -171,7 +171,7 @@ function SidebarContent({
       </nav>
 
       <div className="p-6 text-sm text-primary-foreground/60 flex-shrink-0 bg-primary sticky bottom-0 border-t border-primary/20">
-        <p>Maxtron ERP v1.0.0</p>
+        <p>Maxtron Polymers ERP v1.0.0</p>
       </div>
     </>
   );

@@ -60,7 +60,7 @@ export default function LoginPage() {
               <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center text-primary font-bold text-2xl shadow-inner">
                 M
               </div>
-              <h1 className="text-3xl font-bold tracking-wider">Maxtron ERP</h1>
+              <h1 className="text-3xl font-bold tracking-wider">Maxtron Polymers ERP</h1>
             </div>
             
             <h2 className="text-4xl font-extrabold leading-tight mb-6">
@@ -84,7 +84,7 @@ export default function LoginPage() {
         <div className="w-full lg:w-1/2 p-10 sm:p-14 flex flex-col justify-center bg-card">
           <div className="mb-10 lg:hidden flex items-center space-x-3">
              <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-inner">M</div>
-             <h1 className="text-2xl font-bold text-primary tracking-wider">Maxtron</h1>
+             <h1 className="text-2xl font-bold text-primary tracking-wider">Maxtron Polymers</h1>
           </div>
 
           <div className="mb-10 text-center lg:text-left">
@@ -112,7 +112,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full pl-10 pr-4 py-6 rounded-xl border border-border focus-visible:ring-secondary/50 focus-visible:border-secondary transition-all text-base bg-muted/20"
-                  placeholder="name@maxtron.com"
+                  placeholder="name@maxtronpolymers.com"
                 />
               </div>
             </div>
