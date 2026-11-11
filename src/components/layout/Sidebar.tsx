@@ -96,7 +96,7 @@ function SidebarContent({
               M
             </div>
             <h1 className="text-2xl font-bold tracking-wider transition-all">
-              MAXTRON
+              MAXTRON POLYMERS
             </h1>
           </div>
         </div>
