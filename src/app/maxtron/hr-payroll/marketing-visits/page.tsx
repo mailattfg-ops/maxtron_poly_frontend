@@ -133,6 +133,7 @@ export default function MarketingVisitsPage() {
 
   const [dateFilter, setDateFilter] = useState(''); // Default to empty to show all records initially
   const [visitSearch, setVisitSearch] = useState(''); // what is typed in the list's search box
+  const [customerFilter, setCustomerFilter] = useState('ALL'); // the list's customer dropdown
   const { success, error, info } = useToast();
   const { confirm } = useConfirm();
 
@@ -1070,8 +1071,12 @@ export default function MarketingVisitsPage() {
   };
 
   /** The visits the list is showing: the date filter, then the search box (staff name, client, ...). */
+  const onFilterCustomer = (rec: any) => customerFilter === 'ALL' || (rec.customer_name || '').trim() === customerFilter;
+  const visitCustomers = [...new Set(visitRecords.map(r => (r.customer_name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
   const shownVisits = () => visitRecords
     .filter(onFilterDate)
+    .filter(onFilterCustomer)
     .filter(rec => matchesSearch(rec, visitSearch, VISIT_SEARCH_FIELDS));
 
   const downloadVisitList = async () => {
@@ -2211,13 +2216,29 @@ export default function MarketingVisitsPage() {
                 title="Field Visit Logs"
                 description="Punching details for field staff tracking."
                 headers={['Field Staff', 'Customer / Client', 'Locality', 'Date', 'Timing', 'Outcome / Feedback', 'Action']}
-                data={visitRecords.filter(onFilterDate)}
+                data={visitRecords.filter(onFilterDate).filter(onFilterCustomer)}
                 loading={loading}
                 searchFields={VISIT_SEARCH_FIELDS}
                 onSearchChange={setVisitSearch}
                 searchPlaceholder="Search staff name/ID, client name/ID, location, outcome..."
                 actions={
-                  <div className="flex gap-3">
+                  <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <Select value={customerFilter} onValueChange={setCustomerFilter}>
+                        <SelectTrigger aria-label="Filter by customer" className="w-full sm:w-56 rounded-full border-primary/20 h-9 text-xs bg-white">
+                          <SelectValue placeholder="All customers" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          <SelectItem value="ALL">All customers</SelectItem>
+                          {visitCustomers.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      {customerFilter !== 'ALL' && (
+                        <Button variant="ghost" size="sm" onClick={() => setCustomerFilter('ALL')} className="h-9 px-3 rounded-full text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50">
+                          Clear
+                        </Button>
+                      )}
+                    </div>
                     <span className="flex items-center text-sm font-semibold text-muted-foreground">Filter Date:</span>
                     <div className="flex items-center gap-2">
                       <Input 

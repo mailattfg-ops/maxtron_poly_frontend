@@ -106,6 +106,8 @@ export function TableView<T>({
   const filteredData = searchRows(data, searchQuery, searchFields as any[]);
 
   const totalPages = Math.ceil(filteredData.length / rowsPerPage) || 1;
+  // A page's own filter (a dropdown, a date) can shrink the list under the page you are on
+  if (currentPage > totalPages) setCurrentPage(totalPages);
   const currentData = filteredData.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
   const startIdx = filteredData.length === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1;
