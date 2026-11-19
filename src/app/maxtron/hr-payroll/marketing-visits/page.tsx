@@ -2783,7 +2783,7 @@ export default function MarketingVisitsPage() {
                   </SelectTrigger>
                   <SelectContent className="bg-white z-[1300] max-h-60 overflow-y-auto">
                     <SelectItem value="ALL">All Customers ({new Set(visitRecords.filter(v => v.is_quotation).map(v => v.customer_name)).size} Clients)</SelectItem>
-                    {customers.map(c => (
+                    {[...customers].sort((a, b) => (a.customer_name || '').localeCompare(b.customer_name || '')).map(c => (
                       <SelectItem key={c.id} value={c.customer_name}>
                         {c.customer_name} ({c.customer_code})
                       </SelectItem>

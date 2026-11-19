@@ -50,6 +50,7 @@ export default function MarketingReportsPage() {
     endDate: '',
     status: 'all',
     type: 'all',
+    customer: 'all',
     search: ''
   });
 
@@ -106,9 +107,12 @@ export default function MarketingReportsPage() {
       const typeMatch = filters.type === 'all' || 
                        (filters.type === 'quotation' && v.is_quotation) || 
                        (filters.type === 'visit' && !v.is_quotation);
-      return dateMatch && statusMatch && typeMatch;
+      const customerMatch = filters.customer === 'all' || (v.customer_name || '').trim() === filters.customer;
+      return dateMatch && statusMatch && typeMatch && customerMatch;
     }), filters.search, ['customer_name', 'users.name', 'location']);
   }, [visits, filters]);
+
+  const visitCustomers = useMemo(() => [...new Set(visits.map(v => (v.customer_name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [visits]);
 
   const stats = useMemo(() => {
     const totalVisits = filteredVisits.length;
@@ -224,6 +228,17 @@ export default function MarketingReportsPage() {
           <div className="space-y-1.5 w-40">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">End Date</label>
             <Input type="date" value={filters.endDate} onChange={e => setFilters({...filters, endDate: e.target.value})} className="h-11 bg-white" />
+          </div>
+
+          <div className="space-y-1.5 w-full sm:w-56">
+            <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Customer</label>
+            <Select value={filters.customer} onValueChange={v => setFilters({...filters, customer: v})}>
+              <SelectTrigger aria-label="Filter by customer" className="h-11 bg-white"><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-72">
+                <SelectItem value="all">All Customers</SelectItem>
+                {visitCustomers.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-1.5 w-40">
