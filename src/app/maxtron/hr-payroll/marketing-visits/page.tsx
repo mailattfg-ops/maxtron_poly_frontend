@@ -1542,16 +1542,18 @@ export default function MarketingVisitsPage() {
                               };
                             });
                           }}
+                          onOpenChange={resetDropdownSearch}
                         >
 
                           <SelectTrigger className="w-full h-10 bg-white border-slate-200">
                             <SelectValue placeholder="Select customer..." />
                           </SelectTrigger>
-                          <SelectContent className="bg-white">
+                          <SelectContent className="bg-white max-h-72">
+                            <SelectSearch value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} placeholder="Search customer..." />
                             <SelectItem value="__ADD_NEW__" className="text-primary font-bold bg-primary/5 hover:bg-primary/10">
                               + Add New Customer
                             </SelectItem>
-                            {customers.map(cust => (
+                            {customers.filter(cust => matchesDropdown(`${cust.customer_name || ''} ${cust.customer_code || ''}`)).map(cust => (
                               <SelectItem key={cust.id} value={cust.customer_name}>{cust.customer_name} ({cust.customer_code})</SelectItem>
                             ))}
                           </SelectContent>
