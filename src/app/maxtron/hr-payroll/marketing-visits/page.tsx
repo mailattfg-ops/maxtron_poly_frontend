@@ -11,7 +11,8 @@ import {
   SelectContent, 
   SelectItem, 
   SelectTrigger, 
-  SelectValue 
+  SelectValue,
+  SelectSearch
 } from "@/components/ui/select";
 import {
   Dialog,
@@ -134,6 +135,9 @@ export default function MarketingVisitsPage() {
   const [dateFilter, setDateFilter] = useState(''); // Default to empty to show all records initially
   const [visitSearch, setVisitSearch] = useState(''); // what is typed in the list's search box
   const [customerFilter, setCustomerFilter] = useState('ALL'); // the list's customer dropdown
+  const [dropdownSearch, setDropdownSearch] = useState(''); // the search box of whichever dropdown is open (one at a time)
+  const resetDropdownSearch = () => setDropdownSearch('');
+  const matchesDropdown = (text: string) => text.toLowerCase().includes(dropdownSearch.trim().toLowerCase());
   const { success, error, info } = useToast();
   const { confirm } = useConfirm();
 
@@ -1903,13 +1907,16 @@ export default function MarketingVisitsPage() {
                                           <Select 
                                             value={item.product_id}
                                             onValueChange={(val) => updateQuotationItem(idx, 'product_id', val)}
+                                            onOpenChange={resetDropdownSearch}
                                           >
                                             <SelectTrigger className="w-full h-9 bg-white border-slate-200 text-xs font-semibold">
                                               <SelectValue placeholder="Select Trading Product..." />
                                             </SelectTrigger>
                                             <SelectContent className="bg-white z-[1000] max-h-60">
+                                              <SelectSearch value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} placeholder="Search product..." />
                                               {products
                                                 .filter(p => (p.category || 'PRODUCT').toUpperCase() === 'TRADING')
+                                                .filter(p => matchesDropdown(`${p.product_name || ''} ${p.product_code || ''} ${p.size || ''}`))
                                                 .map(p => (
                                                   <SelectItem key={p.id} value={p.id}>
                                                     {p.product_name} ({p.product_code}) {p.size ? ` - ${p.size}` : ''}
@@ -2040,13 +2047,16 @@ export default function MarketingVisitsPage() {
                                         <Select 
                                           value={item.product_id}
                                           onValueChange={(val) => updateQuotationItem(idx, 'product_id', val)}
+                                          onOpenChange={resetDropdownSearch}
                                         >
                                           <SelectTrigger className="w-full h-9 bg-white border-slate-200 text-xs font-semibold">
                                             <SelectValue placeholder="Select Poly Bags Product..." />
                                           </SelectTrigger>
                                           <SelectContent className="bg-white z-[1000] max-h-60">
+                                            <SelectSearch value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} placeholder="Search product..." />
                                             {products
                                               .filter(p => (p.category || 'PRODUCT').toUpperCase() !== 'TRADING')
+                                              .filter(p => matchesDropdown(`${p.product_name || ''} ${p.product_code || ''} ${p.size || ''} ${p.color || ''}`))
                                               .map(p => (
                                                 <SelectItem key={p.id} value={p.id}>
                                                   {p.product_name} ({p.product_code}) {p.size ? ` - ${p.size}` : ''} {p.color ? `[${p.color}]` : ''}
@@ -2224,13 +2234,14 @@ export default function MarketingVisitsPage() {
                 actions={
                   <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
                     <div className="flex items-center gap-2 w-full sm:w-auto">
-                      <Select value={customerFilter} onValueChange={setCustomerFilter}>
+                      <Select value={customerFilter} onValueChange={setCustomerFilter} onOpenChange={resetDropdownSearch}>
                         <SelectTrigger aria-label="Filter by customer" className="w-full sm:w-56 rounded-full border-primary/20 h-9 text-xs bg-white">
                           <SelectValue placeholder="All customers" />
                         </SelectTrigger>
                         <SelectContent className="max-h-72">
+                          <SelectSearch value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} placeholder="Search customer..." />
                           <SelectItem value="ALL">All customers</SelectItem>
-                          {visitCustomers.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                          {visitCustomers.filter(matchesDropdown).map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
                         </SelectContent>
                       </Select>
                       {customerFilter !== 'ALL' && (
@@ -2777,13 +2788,14 @@ export default function MarketingVisitsPage() {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
               <div className="space-y-1 w-full sm:w-72">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Filter by Customer</label>
-                <Select value={selectedHistoryCustomer} onValueChange={setSelectedHistoryCustomer}>
+                <Select value={selectedHistoryCustomer} onValueChange={setSelectedHistoryCustomer} onOpenChange={resetDropdownSearch}>
                   <SelectTrigger className="w-full h-10 font-bold bg-white border-slate-300">
                     <SelectValue placeholder="All Customers" />
                   </SelectTrigger>
                   <SelectContent className="bg-white z-[1300] max-h-60 overflow-y-auto">
                     <SelectItem value="ALL">All Customers ({new Set(visitRecords.filter(v => v.is_quotation).map(v => v.customer_name)).size} Clients)</SelectItem>
-                    {[...customers].sort((a, b) => (a.customer_name || '').localeCompare(b.customer_name || '')).map(c => (
+                    <SelectSearch value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} placeholder="Search customer..." />
+                    {[...customers].sort((a, b) => (a.customer_name || '').localeCompare(b.customer_name || '')).filter(c => matchesDropdown(`${c.customer_name || ''} ${c.customer_code || ''}`)).map(c => (
                       <SelectItem key={c.id} value={c.customer_name}>
                         {c.customer_name} ({c.customer_code})
                       </SelectItem>

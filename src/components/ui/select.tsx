@@ -127,6 +127,41 @@ function SelectItem({
   )
 }
 
+// A search box for the top of a SelectContent; the caller filters its own items by the value.
+function SelectSearch({ className, ...props }: React.ComponentProps<"input">) {
+  const ref = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => {
+    const input = ref.current
+    const content = input?.closest('[data-slot="select-content"]')
+    if (!input || !content) return
+    // The list takes focus on open and on hover; send typed letters back to the box instead of the list's jump-to-letter
+    const onKey = (e: Event) => {
+      const k = e as KeyboardEvent
+      if (k.target !== input && k.key.length === 1 && !k.ctrlKey && !k.metaKey && !k.altKey) {
+        input.focus()
+        k.stopPropagation()
+      }
+    }
+    content.addEventListener("keydown", onKey, true)
+    const t = setTimeout(() => input.focus(), 0)
+    return () => { content.removeEventListener("keydown", onKey, true); clearTimeout(t) }
+  }, [])
+  return (
+    <div className="sticky top-0 z-10 bg-popover p-1">
+      <input
+        ref={ref}
+        type="search"
+        placeholder="Search..."
+        aria-label="Search options"
+        data-slot="select-search"
+        onKeyDown={e => { if (e.key !== "Escape") e.stopPropagation() }}
+        className={cn("h-8 w-full rounded-md border border-input bg-white px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50", className)}
+        {...props}
+      />
+    </div>
+  )
+}
+
 function SelectSeparator({
   className,
   ...props
@@ -184,6 +219,7 @@ export {
   SelectLabel,
   SelectScrollDownButton,
   SelectScrollUpButton,
+  SelectSearch,
   SelectSeparator,
   SelectTrigger,
   SelectValue,

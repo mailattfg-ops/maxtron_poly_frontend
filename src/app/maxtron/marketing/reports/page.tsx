@@ -31,7 +31,8 @@ import {
   SelectContent, 
   SelectItem, 
   SelectTrigger, 
-  SelectValue 
+  SelectValue,
+  SelectSearch
 } from "@/components/ui/select";
 import { TableView } from '@/components/ui/table-view';
 import * as XLSX from 'xlsx';
@@ -112,6 +113,7 @@ export default function MarketingReportsPage() {
     }), filters.search, ['customer_name', 'users.name', 'location']);
   }, [visits, filters]);
 
+  const [customerSearch, setCustomerSearch] = useState(''); // the customer dropdown's search box
   const visitCustomers = useMemo(() => [...new Set(visits.map(v => (v.customer_name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [visits]);
 
   const stats = useMemo(() => {
@@ -232,11 +234,12 @@ export default function MarketingReportsPage() {
 
           <div className="space-y-1.5 w-full sm:w-56">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1">Customer</label>
-            <Select value={filters.customer} onValueChange={v => setFilters({...filters, customer: v})}>
+            <Select value={filters.customer} onValueChange={v => setFilters({...filters, customer: v})} onOpenChange={() => setCustomerSearch('')}>
               <SelectTrigger aria-label="Filter by customer" className="h-11 bg-white"><SelectValue /></SelectTrigger>
               <SelectContent className="max-h-72">
+                <SelectSearch value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder="Search customer..." />
                 <SelectItem value="all">All Customers</SelectItem>
-                {visitCustomers.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                {visitCustomers.filter(name => name.toLowerCase().includes(customerSearch.trim().toLowerCase())).map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
