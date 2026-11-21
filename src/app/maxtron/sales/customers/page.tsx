@@ -4,8 +4,12 @@ import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneNumbersInput, phoneNumbers } from '@/components/ui/phone-numbers-input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { UserPlus, Save, Search, Edit, Trash2, Plus, X, Building2, Phone, Mail, FileText, CreditCard, MapPin, CheckCircle2 } from 'lucide-react';
+import { UserPlus, Save, Search, Edit, Trash2, Plus, X, Building2, Phone, Mail, FileText, CreditCard, MapPin, CheckCircle2, Download } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { exportToExcel } from '@/utils/export';
+import { searchRows } from '@/utils/tableSearch';
 import { TableView } from '@/components/ui/table-view';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
@@ -14,6 +18,16 @@ import { useRouter } from 'next/navigation';
 
 const API_URL = `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/maxtron/customers`;
 
+// Box 1 is the billing address, box 2 the shipping address. Older customers
+// stored them as 'Customer' / 'Billing', or as a single 'billing' address.
+const toBillingShipping = (addrs: any[] = []) => {
+  const type = (a: any) => (a?.address_type || '').toLowerCase();
+  const billing = addrs.find(a => type(a) === 'customer') || addrs.find(a => type(a) === 'billing') || addrs[0];
+  const shipping = addrs.find(a => a !== billing && type(a) === 'shipping') || addrs.find(a => a !== billing);
+  const blank = { street: '', city: '', state: '', zip_code: '', country: 'India' };
+  return [{ ...blank, ...billing, address_type: 'Billing' }, { ...blank, ...shipping, address_type: 'Shipping' }];
+};
+
 export default function CustomersPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -21,6 +35,8 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [currentCompanyId, setCurrentCompanyId] = useState('');
+  const [customerType, setCustomerType] = useState<'ALL' | 'BILLED' | 'VISITED'>('ALL'); // billed = has a GST number
+  const [listSearch, setListSearch] = useState('');
 
   const [activeTab, setActiveTab] = useState('basic');
   const { success, error } = useToast();
@@ -55,8 +71,8 @@ export default function CustomersPage() {
     is_active: true,
     company_id: '',
     addresses: [
-      { address_type: 'Customer', street: '', city: '', state: '', zip_code: '', country: 'India' },
-      { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' }
+      { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' },
+      { address_type: 'Shipping', street: '', city: '', state: '', zip_code: '', country: 'India' }
     ]
   });
 
@@ -97,6 +113,33 @@ export default function CustomersPage() {
        }
     }
   }, [customers, showForm, editingId, loading]);
+
+  const LIST_SEARCH_FIELDS = ['customer_name', 'customer_code', 'gst_no'];
+  const hasGst = (c: any) => !!(c.gst_no || '').trim();
+  const typeCustomers = customers.filter(c => customerType === 'ALL' || (customerType === 'BILLED') === hasGst(c));
+  const TYPE_LABEL = { ALL: 'All customers', BILLED: 'Billed (with GST)', VISITED: 'Visited (without GST)' };
+
+  // Exports exactly what the list shows: the Customer Type filter plus the search box
+  const exportCustomers = async () => {
+    const list = searchRows(typeCustomers, listSearch, LIST_SEARCH_FIELDS);
+    if (list.length === 0) return error('No customers to export.');
+    const addr = (a: any) => [a?.street, a?.city, a?.state, a?.zip_code].map(v => (v || '').trim()).filter(Boolean).join(', ');
+    const rows = list.map(c => {
+      const [billing, shipping] = toBillingShipping(c.addresses);
+      return [
+        c.customer_code || '', c.customer_name || '', c.gst_no || '', c.contact_person || '', c.mobile_no || '', c.email_id || '',
+        addr(billing), addr(shipping), Number(c.credit_period || 0), Number(c.credit_limit || 0), Number(c.opening_balance || 0),
+        c.is_active === false ? 'Inactive' : 'Active'
+      ];
+    });
+    await exportToExcel({
+      headers: ['Code', 'Customer Name', 'GST No', 'Contact Person', 'Contact Numbers', 'Email', 'Billing Address', 'Shipping Address', 'Credit Period (days)', 'Credit Limit', 'Opening Balance', 'Status'],
+      rows,
+      filename: `Customers_${{ ALL: 'All', BILLED: 'Billed_GST', VISITED: 'Visited' }[customerType]}_${new Date().toISOString().split('T')[0]}.xlsx`,
+      sheetName: 'Customers',
+      topRows: [[`Customer List: ${TYPE_LABEL[customerType]}`], ['Customers', list.length]]
+    });
+  };
 
   const fetchCustomers = async (coId?: string) => {
     const token = localStorage.getItem('token');
@@ -142,8 +185,8 @@ export default function CustomersPage() {
       return false;
     }
 
-    if (formData.mobile_no && !/^[0-9]{10,12}$/.test(formData.mobile_no)) {
-      error('Invalid mobile number. Please enter 10-12 digits.');
+    if (phoneNumbers(formData.mobile_no).some(n => !/^[0-9]{10,12}$/.test(n))) {
+      error('Invalid contact number. Each number must be 10-12 digits.');
       return false;
     }
 
@@ -251,8 +294,8 @@ export default function CustomersPage() {
       is_active: true,
       company_id: currentCompanyId,
       addresses: [
-        { address_type: 'Customer', street: '', city: '', state: '', zip_code: '', country: 'India' },
-        { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' }
+        { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' },
+        { address_type: 'Shipping', street: '', city: '', state: '', zip_code: '', country: 'India' }
       ]
     });
     setActiveTab('basic');
@@ -262,10 +305,7 @@ export default function CustomersPage() {
     setEditingId(cust.id);
     setFormData({
       ...cust,
-      addresses: (cust.addresses?.length > 0) ? cust.addresses : [
-        { address_type: 'Customer', street: '', city: '', state: '', zip_code: '', country: 'India' },
-        { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' }
-      ]
+      addresses: toBillingShipping(cust.addresses)
     });
     setShowForm(true);
   };
@@ -369,7 +409,7 @@ export default function CustomersPage() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-semibold flex items-center"><Phone className="w-4 h-4 mr-2" /> Mobile No.</label>
-                  <Input name="mobile_no" value={formData.mobile_no} onChange={handleInputChange} placeholder="+91 XXXXX XXXXX" />
+                  <PhoneNumbersInput value={formData.mobile_no} onChange={v => setFormData(prev => ({ ...prev, mobile_no: v }))} />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-semibold flex items-center"><Mail className="w-4 h-4 mr-2" /> Email ID</label>
@@ -451,11 +491,11 @@ export default function CustomersPage() {
                     <div key={idx} className="p-4 rounded-xl border border-primary/10 bg-slate-50/50">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-bold text-primary flex items-center">
-                          <MapPin className="w-4 h-4 mr-2" /> {addr.address_type} Address
+                          <MapPin className="w-4 h-4 mr-2" /> {idx === 0 ? 'Billing Address (used on invoice / GST)' : 'Shipping Address'}
                         </h3>
                         {idx === 1 && (
                           <Button variant="ghost" size="sm" onClick={copyBillingToShipping} className="text-[10px] h-7 bg-white shadow-sm border">
-                            Same as Customer Address
+                            Same as Billing Address
                           </Button>
                         )}
                       </div>
@@ -559,10 +599,30 @@ export default function CustomersPage() {
           title="Registered Clients"
           description={`Manage your ${activeTenant} clients and billing details.`}
           headers={['Code', 'Name', 'GST No', 'Credit Terms', 'Logistics', 'Balance', 'Action']}
-          data={customers}
+          data={typeCustomers}
           loading={loading}
-          searchFields={['customer_name', 'customer_code', 'gst_no']}
+          searchFields={LIST_SEARCH_FIELDS}
+          onSearchChange={setListSearch}
           searchPlaceholder="Search customers, codes or GST..."
+          actions={
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <Select value={customerType} onValueChange={v => setCustomerType(v as any)}>
+                <SelectTrigger aria-label="Customer type" className="w-full sm:w-56 rounded-full border-primary/20 h-9 text-xs bg-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['ALL', 'BILLED', 'VISITED'] as const).map(t => (
+                    <SelectItem key={t} value={t}>
+                      {TYPE_LABEL[t]} ({t === 'ALL' ? customers.length : customers.filter(c => (t === 'BILLED') === hasGst(c)).length})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" onClick={exportCustomers} className="h-9 rounded-full px-4 text-xs font-bold border-primary/20 text-primary w-full sm:w-auto">
+                <Download className="w-3.5 h-3.5 mr-1.5" /> Export
+              </Button>
+            </div>
+          }
           deleteUrl={API_URL}
           onRefresh={fetchCustomers}
           renderRow={(c: any) => {

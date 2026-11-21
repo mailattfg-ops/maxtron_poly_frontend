@@ -16,17 +16,29 @@ import {
     Select, 
     SelectContent, 
     SelectItem, 
-    SelectTrigger, 
-    SelectValue 
+    SelectTrigger,
+    SelectValue,
+    SelectSearch
 } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { exportToExcel } from '@/utils/export';
+import { buildLedger, type LedgerEntry } from '@/utils/ledger';
 
 export default function CustomerLedgerPage() {
-    const [ledgerData, setLedgerData] = useState<any[]>([]);
+    const [entries, setEntries] = useState<LedgerEntry[] | null>(null); // the chosen customer's transactions, all dates
     const [customers, setCustomers] = useState<any[]>([]);
     const [selectedCustomer, setSelectedCustomer] = useState('');
+    const [customerSearch, setCustomerSearch] = useState('');
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
     const [loading, setLoading] = useState(false);
-    const [balance, setBalance] = useState(0);
+
+    const customer = customers.find(c => c.id === selectedCustomer);
+    const ledger = entries ? buildLedger(entries, Number(customer?.opening_balance || 0), 'debit', fromDate, toDate) : { rows: [] as any[], opening: 0, closing: 0 };
+    const ledgerData = ledger.rows;
+    const balance = ledger.closing;
+    const showDate = (d: string) => { const t = new Date(d); return d && !isNaN(t.getTime()) ? t.toLocaleDateString() : '-'; };
+    const periodText = fromDate || toDate ? `${fromDate ? showDate(fromDate) : 'Start'} to ${toDate ? showDate(toDate) : 'Today'}` : 'All dates';
 
     const { error: toastError } = useToast();
     const companyId = localStorage.getItem('companyId') || '24ea3bef-1e0c-4490-9d40-7063fb9067e9';
@@ -66,17 +78,8 @@ export default function CustomerLedgerPage() {
             const invData = await invRes.json();
             const collData = await collRes.json();
             const retData = await retRes.json();
-            const customer = customers.find(c => c.id === selectedCustomer);
 
-            const combined = [
-                {
-                    id: 'OB',
-                    date: '2025-01-01', // Before any current year date
-                    ref: 'OP-BAL',
-                    type: 'Balance B/F',
-                    debit: Number(customer?.opening_balance || 0),
-                    credit: 0
-                },
+            const combined: LedgerEntry[] = [
                 ...(invData.success ? invData.data : [])
                     .filter((i: any) => i.customer_id === selectedCustomer)
                     .map((i: any) => ({
@@ -107,24 +110,9 @@ export default function CustomerLedgerPage() {
                         debit: 0,
                         credit: Number(r.total_return_value || 0)
                     }))
-            ].sort((a, b) => {
-                const dateA = new Date(a.date).getTime();
-                const dateB = new Date(b.date).getTime();
-                if (dateA !== dateB) return dateA - dateB;
-                // If same day, put OB first
-                if (a.id === 'OB') return -1;
-                if (b.id === 'OB') return 1;
-                return 0;
-            });
+            ];
 
-            let currentBalance = 0;
-            const finalized = combined.map(item => {
-                currentBalance += (item.debit - item.credit);
-                return { ...item, balance: currentBalance };
-            });
-
-            setLedgerData(finalized);
-            setBalance(currentBalance);
+            setEntries(combined);
         } catch (err) {
             toastError('Failed to generate ledger');
         } finally {
@@ -134,10 +122,9 @@ export default function CustomerLedgerPage() {
 
     const downloadLedger = async () => {
         if (ledgerData.length === 0) return;
-        const customer = customers.find(c => c.id === selectedCustomer);
         const headers = ['Date', 'Transaction Type', 'Reference', 'Debit (+)', 'Credit (-)', 'Running Balance'];
         const rows = ledgerData.map(item => [
-            new Date(item.date).toLocaleDateString(),
+            showDate(item.date),
             item.type,
             item.ref,
             Number(item.debit || 0),
@@ -148,8 +135,14 @@ export default function CustomerLedgerPage() {
         await exportToExcel({
             headers,
             rows,
-            filename: `Customer_Ledger_${customer?.customer_name?.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`,
-            sheetName: 'Ledger Statement'
+            filename: `Customer_Ledger_${customer?.customer_name?.replace(/\s+/g, '_')}_${fromDate || 'start'}_to_${toDate || new Date().toISOString().split('T')[0]}.xlsx`,
+            sheetName: 'Ledger Statement',
+            topRows: [
+                [`Customer Ledger: ${customer?.customer_name || ''}${customer?.customer_code ? ` (${customer.customer_code})` : ''}`],
+                ['Period', periodText],
+                ['Opening Balance', ledger.opening],
+                ['Closing Balance', ledger.closing]
+            ]
         });
     };
 
@@ -164,22 +157,34 @@ export default function CustomerLedgerPage() {
                     <p className="text-slate-500 text-xs md:text-sm font-medium mt-1">Detailed transaction history and outstanding balance</p>
                 </div>
                 
-                <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-center gap-3 w-full md:w-auto">
                     <div className="relative w-full sm:w-auto flex-1 sm:flex-none">
                         <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10" />
                         <Select
                             value={selectedCustomer}
-                            onValueChange={(val) => setSelectedCustomer(val)}
+                            onValueChange={(val) => { setSelectedCustomer(val); setEntries(null); }}
+                            onOpenChange={() => setCustomerSearch('')}
                         >
-                            <SelectTrigger className="w-full sm:w-[200px] pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm h-11">
+                            <SelectTrigger aria-label="Customer" className="w-full sm:w-[200px] pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm h-11">
                                 <SelectValue placeholder="Select Customer" />
                             </SelectTrigger>
-                            <SelectContent className="bg-white border-slate-200">
-                                {customers.map((c: any) => (
+                            <SelectContent className="bg-white border-slate-200 max-h-72">
+                                <SelectSearch value={customerSearch} onChange={e => setCustomerSearch(e.target.value)} placeholder="Search customer..." />
+                                {customers
+                                    .filter((c: any) => `${c.customer_name || ''} ${c.customer_code || ''}`.toLowerCase().includes(customerSearch.trim().toLowerCase()))
+                                    .map((c: any) => (
                                     <SelectItem key={c.id} value={c.id}>{c.customer_name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
+                    </div>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <Input type="date" aria-label="From date" value={fromDate} max={toDate || undefined} onChange={e => setFromDate(e.target.value)} className="h-11 flex-1 sm:w-36 rounded-xl bg-slate-50 text-sm" />
+                        <span className="text-xs font-bold text-slate-400">to</span>
+                        <Input type="date" aria-label="To date" value={toDate} min={fromDate || undefined} onChange={e => setToDate(e.target.value)} className="h-11 flex-1 sm:w-36 rounded-xl bg-slate-50 text-sm" />
+                        {(fromDate || toDate) && (
+                            <Button variant="ghost" size="sm" onClick={() => { setFromDate(''); setToDate(''); }} className="h-9 px-3 rounded-full text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50">Clear</Button>
+                        )}
                     </div>
                     <Button
                         onClick={fetchLedger}
@@ -209,7 +214,7 @@ export default function CustomerLedgerPage() {
                                     <TrendingUp className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest text-[10px]">Ending Balance</p>
+                                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest text-[10px]">Ending Balance · {periodText}</p>
                                     <h2 className="text-2xl font-black text-slate-900">₹{Math.abs(balance).toLocaleString()}</h2>
                                 </div>
                             </div>

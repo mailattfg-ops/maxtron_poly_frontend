@@ -16,17 +16,29 @@ import {
     Select, 
     SelectContent, 
     SelectItem, 
-    SelectTrigger, 
-    SelectValue 
+    SelectTrigger,
+    SelectValue,
+    SelectSearch
 } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { exportToExcel } from '@/utils/export';
+import { buildLedger, type LedgerEntry } from '@/utils/ledger';
 
 export default function SupplierLedgerPage() {
-    const [ledgerData, setLedgerData] = useState<any[]>([]);
+    const [entries, setEntries] = useState<LedgerEntry[] | null>(null); // the chosen supplier's transactions, all dates
     const [suppliers, setSuppliers] = useState<any[]>([]);
     const [selectedSupplier, setSelectedSupplier] = useState('');
+    const [supplierSearch, setSupplierSearch] = useState('');
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
     const [loading, setLoading] = useState(false);
-    const [balance, setBalance] = useState(0);
+
+    const supplier = suppliers.find(s => s.id === selectedSupplier);
+    const ledger = entries ? buildLedger(entries, Number(supplier?.opening_balance || 0), 'credit', fromDate, toDate) : { rows: [] as any[], opening: 0, closing: 0 };
+    const ledgerData = ledger.rows;
+    const balance = ledger.closing;
+    const showDate = (d: string) => { const t = new Date(d); return d && !isNaN(t.getTime()) ? t.toLocaleDateString() : '-'; };
+    const periodText = fromDate || toDate ? `${fromDate ? showDate(fromDate) : 'Start'} to ${toDate ? showDate(toDate) : 'Today'}` : 'All dates';
 
     const { error: toastError } = useToast();
     const companyId = localStorage.getItem('companyId') || '24ea3bef-1e0c-4490-9d40-7063fb9067e9';
@@ -66,17 +78,8 @@ export default function SupplierLedgerPage() {
             const purData = await purRes.json();
             const payData = await payRes.json();
             const retData = await retRes.json();
-            const supplier = suppliers.find(s => s.id === selectedSupplier);
 
-            const combined = [
-                {
-                    id: 'OB',
-                    date: '2025-01-01',
-                    ref: 'OP-BAL',
-                    type: 'Balance B/F',
-                    credit: Number(supplier?.opening_balance || 0),
-                    debit: 0
-                },
+            const combined: LedgerEntry[] = [
                 ...(purData.success ? purData.data : [])
                     .filter((p: any) => p.supplier_id === selectedSupplier)
                     .map((p: any) => ({
@@ -104,23 +107,9 @@ export default function SupplierLedgerPage() {
                         credit: 0,
                         debit: Number(r.total_return_value || 0) 
                     }))
-            ].sort((a, b) => {
-                const dateA = new Date(a.date).getTime();
-                const dateB = new Date(b.date).getTime();
-                if (dateA !== dateB) return dateA - dateB;
-                if (a.ref === 'OP-BAL') return -1;
-                if (b.ref === 'OP-BAL') return 1;
-                return 0;
-            });
+            ];
 
-            let currentBalance = 0;
-            const finalized = combined.map(item => {
-                currentBalance += (item.credit - item.debit);
-                return { ...item, balance: currentBalance };
-            });
-
-            setLedgerData(finalized);
-            setBalance(currentBalance);
+            setEntries(combined);
         } catch (error) {
             toastError('Failed to generate ledger');
         } finally {
@@ -130,10 +119,9 @@ export default function SupplierLedgerPage() {
 
     const downloadLedger = async () => {
         if (ledgerData.length === 0) return;
-        const supplier = suppliers.find(s => s.id === selectedSupplier);
         const headers = ['Date', 'Transaction Type', 'Reference', 'Bill (Credit)', 'Paid (Debit)', 'Running Balance'];
         const rows = ledgerData.map(item => [
-            new Date(item.date).toLocaleDateString(),
+            showDate(item.date),
             item.type,
             item.ref,
             Number(item.credit || 0),
@@ -144,8 +132,14 @@ export default function SupplierLedgerPage() {
         await exportToExcel({
             headers,
             rows,
-            filename: `Supplier_Ledger_${supplier?.supplier_name?.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`,
-            sheetName: 'Ledger Statement'
+            filename: `Supplier_Ledger_${supplier?.supplier_name?.replace(/\s+/g, '_')}_${fromDate || 'start'}_to_${toDate || new Date().toISOString().split('T')[0]}.xlsx`,
+            sheetName: 'Ledger Statement',
+            topRows: [
+                [`Supplier Ledger: ${supplier?.supplier_name || ''}${supplier?.supplier_code ? ` (${supplier.supplier_code})` : ''}`],
+                ['Period', periodText],
+                ['Opening Payable', ledger.opening],
+                ['Closing Payable', ledger.closing]
+            ]
         });
     };
 
@@ -160,22 +154,34 @@ export default function SupplierLedgerPage() {
                     <p className="text-slate-500 text-xs md:text-sm font-medium mt-1">Detailed history of purchases and payments</p>
                 </div>
                 
-                <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-center gap-3 w-full md:w-auto">
                     <div className="relative w-full sm:w-auto flex-1 sm:flex-none">
                         <Truck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 z-10" />
                         <Select
                             value={selectedSupplier}
-                            onValueChange={(val) => setSelectedSupplier(val)}
+                            onValueChange={(val) => { setSelectedSupplier(val); setEntries(null); }}
+                            onOpenChange={() => setSupplierSearch('')}
                         >
-                            <SelectTrigger className="w-full sm:w-[200px] pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm h-11">
+                            <SelectTrigger aria-label="Supplier" className="w-full sm:w-[200px] pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm h-11">
                                 <SelectValue placeholder="Select Supplier" />
                             </SelectTrigger>
-                            <SelectContent className="bg-white border-slate-200">
-                                {suppliers.map((s: any) => (
+                            <SelectContent className="bg-white border-slate-200 max-h-72">
+                                <SelectSearch value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)} placeholder="Search supplier..." />
+                                {suppliers
+                                    .filter((s: any) => `${s.supplier_name || ''} ${s.supplier_code || ''}`.toLowerCase().includes(supplierSearch.trim().toLowerCase()))
+                                    .map((s: any) => (
                                     <SelectItem key={s.id} value={s.id}>{s.supplier_name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
+                    </div>
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <Input type="date" aria-label="From date" value={fromDate} max={toDate || undefined} onChange={e => setFromDate(e.target.value)} className="h-11 flex-1 sm:w-36 rounded-xl bg-slate-50 text-sm" />
+                        <span className="text-xs font-bold text-slate-400">to</span>
+                        <Input type="date" aria-label="To date" value={toDate} min={fromDate || undefined} onChange={e => setToDate(e.target.value)} className="h-11 flex-1 sm:w-36 rounded-xl bg-slate-50 text-sm" />
+                        {(fromDate || toDate) && (
+                            <Button variant="ghost" size="sm" onClick={() => { setFromDate(''); setToDate(''); }} className="h-9 px-3 rounded-full text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50">Clear</Button>
+                        )}
                     </div>
                     <Button
                         onClick={fetchLedger}
@@ -205,7 +211,7 @@ export default function SupplierLedgerPage() {
                                     <TrendingDown className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest text-[10px]">Ending Payable</p>
+                                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest text-[10px]">Ending Payable · {periodText}</p>
                                     <h2 className="text-2xl font-black text-slate-900">₹{Math.abs(balance).toLocaleString()}</h2>
                                 </div>
                             </div>
@@ -224,7 +230,7 @@ export default function SupplierLedgerPage() {
                         searchPlaceholder="Filter ref..."
                         renderRow={(item: any) => (
                             <tr key={`${item.type}-${item.ref}`} className="hover:bg-primary/5 transition-all border-b border-slate-50 last:border-none">
-                                <td className="px-6 py-4">{new Date(item.date).toLocaleDateString()}</td>
+                                <td className="px-6 py-4">{showDate(item.date)}</td>
                                 <td className="px-6 py-4 font-medium">{item.type}</td>
                                 <td className="px-6 py-4 text-xs font-mono">{item.ref}</td>
                                 <td className="px-6 py-4 text-blue-600 font-bold">{item.credit > 0 ? `₹${item.credit.toLocaleString()}` : '-'}</td>

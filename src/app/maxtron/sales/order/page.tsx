@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneNumbersInput, phoneNumbers } from '@/components/ui/phone-numbers-input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { 
   ShoppingBag, Plus, Trash2, Save, X, Search, 
@@ -82,8 +83,8 @@ export default function CustomerOrderEntry() {
     is_active: true,
     company_id: '',
     addresses: [
-      { address_type: 'Customer', street: '', city: '', state: '', zip_code: '', country: 'India' },
-      { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' }
+      { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' },
+      { address_type: 'Shipping', street: '', city: '', state: '', zip_code: '', country: 'India' }
     ]
   });
 
@@ -125,8 +126,8 @@ export default function CustomerOrderEntry() {
       is_active: true,
       company_id: currentCompanyId,
       addresses: [
-        { address_type: 'Customer', street: '', city: '', state: '', zip_code: '', country: 'India' },
-        { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' }
+        { address_type: 'Billing', street: '', city: '', state: '', zip_code: '', country: 'India' },
+        { address_type: 'Shipping', street: '', city: '', state: '', zip_code: '', country: 'India' }
       ]
     });
     setCustomerActiveTab('basic');
@@ -157,8 +158,8 @@ export default function CustomerOrderEntry() {
       return false;
     }
 
-    if (customerFormData.mobile_no && !/^[0-9]{10,12}$/.test(customerFormData.mobile_no)) {
-      error('Invalid mobile number. Please enter 10-12 digits.');
+    if (phoneNumbers(customerFormData.mobile_no).some(n => !/^[0-9]{10,12}$/.test(n))) {
+      error('Invalid contact number. Each number must be 10-12 digits.');
       return false;
     }
 
@@ -1363,7 +1364,7 @@ export default function CustomerOrderEntry() {
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-semibold flex items-center"><Phone className="w-4 h-4 mr-2" /> Mobile No.</label>
-                        <Input name="mobile_no" value={customerFormData.mobile_no} onChange={handleCustomerInputChange} placeholder="+91 XXXXX XXXXX" />
+                        <PhoneNumbersInput value={customerFormData.mobile_no} onChange={v => setCustomerFormData(prev => ({ ...prev, mobile_no: v }))} />
                       </div>
                       <div className="space-y-2">
                         <label className="text-sm font-semibold flex items-center"><Mail className="w-4 h-4 mr-2" /> Email ID</label>
@@ -1445,11 +1446,11 @@ export default function CustomerOrderEntry() {
                           <div key={idx} className="p-4 rounded-xl border border-primary/10 bg-slate-50/50">
                             <div className="flex items-center justify-between mb-4">
                               <h3 className="font-bold text-primary flex items-center">
-                                <MapPin className="w-4 h-4 mr-2" /> {addr.address_type} Address
+                                <MapPin className="w-4 h-4 mr-2" /> {idx === 0 ? 'Billing Address (used on invoice / GST)' : 'Shipping Address'}
                               </h3>
                               {idx === 1 && (
                                 <Button type="button" variant="ghost" size="sm" onClick={copyBillingToShipping} className="text-[10px] h-7 bg-white shadow-sm border">
-                                  Same as Customer Address
+                                  Same as Billing Address
                                 </Button>
                               )}
                             </div>

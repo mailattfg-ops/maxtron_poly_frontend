@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
-import { exportToExcel, exportToCSV } from '@/utils/export';
+import { Input } from '@/components/ui/input';
+import { exportToExcel } from '@/utils/export';
 
 export default function FinancialSummaryPage() {
     const [transactions, setTransactions] = useState<any[]>([]);
@@ -83,11 +84,20 @@ export default function FinancialSummaryPage() {
         }
     };
 
+    // Only the chosen period; an empty From / To leaves that side open
+    const day = (d: string) => String(d || '').slice(0, 10);
+    const shown = transactions.filter(t => (!dateRange.start || day(t.date) >= dateRange.start) && (!dateRange.end || day(t.date) <= dateRange.end));
+    const sumOf = (f: (t: any) => boolean) => shown.filter(f).reduce((sum, t) => sum + t.amount, 0);
+    const totalIn = sumOf(t => t.flow === 'IN');
+    const totalOut = sumOf(t => t.flow === 'OUT');
+    const showDate = (d: string) => { const t = new Date(d); return d && !isNaN(t.getTime()) ? t.toLocaleDateString() : '-'; };
+    const periodText = dateRange.start || dateRange.end ? `${dateRange.start ? showDate(dateRange.start) : 'Start'} to ${dateRange.end ? showDate(dateRange.end) : 'Today'}` : 'All dates';
+
     const downloadSummary = async () => {
-        if (transactions.length === 0) return;
+        if (shown.length === 0) return;
         const headers = ['Date', 'Type', 'Voucher', 'Party / Recipient', 'Flow', 'Amount'];
-        const rows = transactions.map(t => [
-            new Date(t.date).toLocaleDateString(),
+        const rows = shown.map(t => [
+            showDate(t.date),
             t.type,
             t.ref,
             t.party,
@@ -95,12 +105,23 @@ export default function FinancialSummaryPage() {
             Number(t.amount || 0)
         ]);
 
-        await exportToCSV({
+        await exportToExcel({
             headers,
             rows,
-            filename: `Financial_Summary_${new Date().toISOString().split('T')[0]}.csv`
+            filename: `Financial_Summary_${dateRange.start || 'start'}_to_${dateRange.end || new Date().toISOString().split('T')[0]}.xlsx`,
+            sheetName: 'Financial Summary',
+            topRows: [
+                ['Maxtron Polymers: Financial Summary'],
+                ['Period', periodText],
+                ['Customer Collections (In)', sumOf(t => t.type === 'Collection')],
+                ['Supplier Payments (Out)', sumOf(t => t.type === 'Payment')],
+                ['Petty Cash (Out)', sumOf(t => t.type === 'Petty Cash')],
+                ['Total Inflow', totalIn],
+                ['Total Outflow', totalOut],
+                ['Net Movement', totalIn - totalOut]
+            ]
         });
-        toastSuccess('Summary exported successfully as CSV');
+        toastSuccess('Summary exported');
     };
 
     return (
@@ -113,11 +134,16 @@ export default function FinancialSummaryPage() {
                     </h1>
                     <p className="text-slate-500 text-sm mt-1">Consolidated view of all financial inflows and outflows</p>
                 </div>
-                <div className="flex gap-2">
-                    <Button 
+                <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <Input type="date" aria-label="From date" value={dateRange.start} max={dateRange.end || undefined} onChange={e => setDateRange({ ...dateRange, start: e.target.value })} className="h-11 flex-1 sm:w-36 rounded-xl text-sm" />
+                        <span className="text-xs font-bold text-slate-400">to</span>
+                        <Input type="date" aria-label="To date" value={dateRange.end} min={dateRange.start || undefined} onChange={e => setDateRange({ ...dateRange, end: e.target.value })} className="h-11 flex-1 sm:w-36 rounded-xl text-sm" />
+                    </div>
+                    <Button
                         onClick={downloadSummary}
-                        variant="outline" 
-                        disabled={transactions.length === 0}
+                        variant="outline"
+                        disabled={shown.length === 0}
                         className="rounded-xl flex items-center gap-2 h-11 px-6 font-bold"
                     >
                         <Download className="w-4 h-4" /> Export Report
@@ -131,30 +157,29 @@ export default function FinancialSummaryPage() {
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Inflow</p>
                     <div className="text-2xl font-black text-emerald-600 flex items-center gap-2">
                         <ArrowDownLeft className="w-5 h-5" />
-                        ₹{transactions.filter(t => t.flow === 'IN').reduce((sum, t) => sum + t.amount, 0).toLocaleString()}
+                        ₹{totalIn.toLocaleString()}
                     </div>
                 </div>
                 <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Outflow</p>
                     <div className="text-2xl font-black text-rose-600 flex items-center gap-2">
                         <ArrowUpRight className="w-5 h-5" />
-                        ₹{transactions.filter(t => t.flow === 'OUT').reduce((sum, t) => sum + t.amount, 0).toLocaleString()}
+                        ₹{totalOut.toLocaleString()}
                     </div>
                 </div>
                 <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm bg-gradient-to-br from-slate-50 to-white">
                     <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">Net Movement</p>
                     <div className="text-2xl font-black text-slate-900 flex items-center gap-2">
                         <Wallet className="w-5 h-5 text-primary" />
-                        ₹{(transactions.filter(t => t.flow === 'IN').reduce((sum, t) => sum + t.amount, 0) - 
-                           transactions.filter(t => t.flow === 'OUT').reduce((sum, t) => sum + t.amount, 0)).toLocaleString()}
+                        ₹{(totalIn - totalOut).toLocaleString()}
                     </div>
                 </div>
             </div>
 
             <TableView
-                title="Consolidated Transaction Log"
+                title={`Consolidated Transaction Log · ${periodText}`}
                 headers={['Date', 'Type', 'Voucher', 'Party / Recipient', 'Flow', 'Amount']}
-                data={transactions}
+                data={shown}
                 loading={loading}
                 searchFields={['ref', 'party', 'type']}
                 searchPlaceholder="Search anything..."

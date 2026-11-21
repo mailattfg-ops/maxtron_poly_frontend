@@ -397,8 +397,10 @@ export async function renderTaxInvoicePage(
 
   // Addresses
   const rawAddresses = customer.addresses || [];
-  const billingAddrObj = rawAddresses.find((a: any) => a.address_type?.toLowerCase() === 'billing' || a.address_type?.toLowerCase() === 'customer') || rawAddresses[0] || {};
-  const shippingAddrObj = rawAddresses.find((a: any) => a.address_type?.toLowerCase() === 'shipping' || a.address_type?.toLowerCase() === 'customer') || rawAddresses[1] || rawAddresses[0] || {};
+  const filled = (a: any) => [a.street, a.city, a.zip_code].some(v => String(v || '').trim());
+  const billingAddrObj = rawAddresses.find((a: any) => ['billing', 'customer'].includes(a.address_type?.toLowerCase()) && filled(a)) || rawAddresses[0] || {};
+  // Ship to: the shipping address when one is filled in, else the billing address
+  const shippingAddrObj = rawAddresses.find((a: any) => a.address_type?.toLowerCase() === 'shipping' && filled(a)) || billingAddrObj;
 
   const buildAddressStr = (addr: any) => {
     const parts = [addr.street, addr.city, addr.state, addr.zip_code].filter(Boolean);
@@ -1174,8 +1176,10 @@ export async function renderEWayBillPage(
   const customerGstin = customer.gst_no || '';
   
   const rawAddresses = customer.addresses || [];
-  const billingAddrObj = rawAddresses.find((a: any) => a.address_type?.toLowerCase() === 'billing' || a.address_type?.toLowerCase() === 'customer') || rawAddresses[0] || {};
-  const shippingAddrObj = rawAddresses.find((a: any) => a.address_type?.toLowerCase() === 'shipping' || a.address_type?.toLowerCase() === 'customer') || rawAddresses[1] || rawAddresses[0] || {};
+  const filled = (a: any) => [a.street, a.city, a.zip_code].some(v => String(v || '').trim());
+  const billingAddrObj = rawAddresses.find((a: any) => ['billing', 'customer'].includes(a.address_type?.toLowerCase()) && filled(a)) || rawAddresses[0] || {};
+  // Ship to: the shipping address when one is filled in, else the billing address
+  const shippingAddrObj = rawAddresses.find((a: any) => a.address_type?.toLowerCase() === 'shipping' && filled(a)) || billingAddrObj;
 
   const customerShipAddr = [
     shippingAddrObj.street,

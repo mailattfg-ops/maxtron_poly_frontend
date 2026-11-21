@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneNumbersInput, phoneNumbers } from '@/components/ui/phone-numbers-input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { MapPin, Briefcase, Calendar, Clock, Plus, Search, Edit, Trash2, X, Save, Building2, Quote, Download, ExternalLink, ArrowRight, Package, ChevronDown, ChevronUp, Eye, TrendingUp, Users, CheckCircle, Phone, Mail, Truck, Settings2, Edit2, Check } from 'lucide-react';
 import { 
@@ -497,8 +498,8 @@ export default function MarketingVisitsPage() {
       error('Customer Name is required (minimum 2 characters).');
       return;
     }
-    if (newCustomerData.mobile_no && !/^[0-9+\-\s]{7,15}$/.test(newCustomerData.mobile_no)) {
-      error('Please enter a valid mobile number.');
+    if (phoneNumbers(newCustomerData.mobile_no).some(n => !/^[0-9+\-\s]{7,15}$/.test(n))) {
+      error('Please enter a valid mobile number. Each number must be 7-15 digits.');
       return;
     }
     if (newCustomerData.zip_code && !/^[0-9]{6}$/.test(newCustomerData.zip_code)) {
@@ -2523,12 +2524,11 @@ export default function MarketingVisitsPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-600 uppercase">Mobile Number</label>
-                <Input
+                <label className="text-xs font-bold text-slate-600 uppercase">Mobile Number(s)</label>
+                <PhoneNumbersInput
                   value={newCustomerData.mobile_no}
-                  onChange={(e) => setNewCustomerData({ ...newCustomerData, mobile_no: e.target.value })}
+                  onChange={v => setNewCustomerData(prev => ({ ...prev, mobile_no: v }))}
                   placeholder="+91 9876543210"
-                  className="h-9 text-sm"
                 />
               </div>
             </div>

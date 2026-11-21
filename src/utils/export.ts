@@ -7,15 +7,23 @@ export const exportToExcel = async ({
   headers,
   rows,
   filename,
-  sheetName = 'Report'
+  sheetName = 'Report',
+  topRows = []
 }: {
   headers: string[];
   rows: (any)[][];
   filename: string;
   sheetName?: string;
+  topRows?: (any)[][]; // lines above the table, e.g. title, period, totals
 }) => {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet(sheetName);
+
+  topRows.forEach((line, i) => {
+    const r = worksheet.addRow(line);
+    r.font = { name: 'Calibri', size: i === 0 ? 14 : 11, bold: true };
+  });
+  if (topRows.length) worksheet.addRow([]);
 
   // Add Headers
   const headerRow = worksheet.addRow(headers);
@@ -56,7 +64,8 @@ export const exportToExcel = async ({
   // Auto-fit columns
   worksheet.columns.forEach((column) => {
     let maxLength = 0;
-    column.eachCell?.({ includeEmpty: true }, (cell) => {
+    column.eachCell?.({ includeEmpty: true }, (cell, rowNumber) => {
+        if (rowNumber <= (topRows.length ? topRows.length + 1 : 0)) return; // title lines may run wide
         const columnLength = cell.value ? cell.value.toString().length : 10;
         if (columnLength > maxLength) {
             maxLength = columnLength;
