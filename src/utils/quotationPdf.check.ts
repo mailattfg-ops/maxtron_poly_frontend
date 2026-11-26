@@ -62,7 +62,23 @@ assert.strictEqual(itemDescription({ product_name: 'BLUE 30 X 36', custom_size: 
 const custom = textOf(buildQuotationPdf({ ...bags, quotation_items: [{ ...bags.quotation_items[0], custom_size: '28 X 34' }] }, assets).output());
 assert.ok(custom.includes('28 X 34 GREEN'), 'PDF prints the client size in place of 30X50');
 
+// One page for the usual 6-8 products (the 6-product Parabrahma quote used to spill its sign-off onto page 2)
+const many = (n: number) => ({ ...bags, customer_name: 'PARABRAHAMA HOSPITAL', location: 'Ochira, Kollam',
+    quotation_items: Array.from({ length: n }, (_, i) => ({ product_name: `${i % 2 ? 'GREEN' : 'BLACK'} 19 X 22`, amount: 107, bags_per_kg: '70 to 71', quantity: 1, gst_percent: 18 })) });
+const six = buildQuotationPdf(many(6), assets);
+const eight = buildQuotationPdf(many(8), assets);
+assert.strictEqual(six.getNumberOfPages(), 1, 'six products fit one page');
+assert.strictEqual(eight.getNumberOfPages(), 1, 'eight products fit one page');
+assert.ok(textOf(eight.output()).includes('SHIBIN'), 'sign-off printed on the tightened page');
+let fits = 8; while (buildQuotationPdf(many(fits + 1), assets).getNumberOfPages() === 1) fits++;
+console.log(`bags: up to ${fits} products on one page`);
+const longer = buildQuotationPdf(many(fits + 1), assets);
+const p2 = longer.getNumberOfPages();
+assert.strictEqual(p2, 2, 'more products move to a second page');
+
 if (process.env.OUT_DIR) {
+    fs.writeFileSync(path.join(process.env.OUT_DIR, 'q-bags-6.pdf'), Buffer.from(six.output('arraybuffer')));
+    fs.writeFileSync(path.join(process.env.OUT_DIR, 'q-bags-8.pdf'), Buffer.from(eight.output('arraybuffer')));
     fs.writeFileSync(path.join(process.env.OUT_DIR, 'q-bags.pdf'), Buffer.from(b.output('arraybuffer')));
     fs.writeFileSync(path.join(process.env.OUT_DIR, 'q-trading.pdf'), Buffer.from(t.output('arraybuffer')));
     console.log('wrote q-bags.pdf and q-trading.pdf');

@@ -94,32 +94,36 @@ const footer = (doc: jsPDF) => {
     }
 };
 
-/** Writes lines down the page from y, moving to a new page when needed. Returns the next y. */
-const lines = (doc: jsPDF, texts: { text: string; bold?: boolean; size?: number; x?: number; gap?: number }[], y: number) => {
+/**
+ * Writes lines down the page from y, moving to a new page when needed. Returns the next y.
+ * k scales the gaps between lines: 1 normally, less when a quotation is squeezed onto one page.
+ */
+const lines = (doc: jsPDF, texts: { text: string; bold?: boolean; size?: number; x?: number; gap?: number }[], y: number, k = 1) => {
     for (const t of texts) {
         if (y > BOTTOM) { doc.addPage(); y = 20; }
         doc.setFont('helvetica', t.bold ? 'bold' : 'normal');
         doc.setFontSize(t.size || 11);
         doc.text(pdfText(t.text), t.x ?? LEFT, y);
-        y += t.gap ?? 6;
+        y += (t.gap ?? 6) * k;
     }
     return y;
 };
 
-const signOff = (doc: jsPDF, record: any, y: number) => {
+const signOff = (doc: jsPDF, record: any, y: number, k = 1) => {
     const executive = record.users || {};
     const sign = [
         executive.name || record.employee_name,
         record.job_role || executive.job_role || executive.designation,
         record.contact_number || executive.phone || record.contact_phone,
     ].filter(Boolean).map(String);
-    // Keep the sign-off together
-    if (y + 14 + sign.length * 6 + 18 > BOTTOM) { doc.addPage(); y = 20; }
+    // Keep the sign-off together: a new page only when its last line would pass the bottom
+    const lastLine = y + 6 * k + 20 * k + Math.max(0, sign.length - 1) * 6 * k;
+    if (lastLine > BOTTOM) { doc.addPage(); y = 20; }
     return lines(doc, [
         { text: 'Thanks & Best Regards,', size: 12, gap: 10 },
         { text: 'For MAXTRON ASSOCIATES', size: 12, gap: 10 },
         ...sign.map(s => ({ text: s, size: 12, gap: 6 })),
-    ], y + 6);
+    ], y + 6 * k, k);
 };
 
 const tableStyles = {
@@ -128,7 +132,8 @@ const tableStyles = {
     headStyles: { fillColor: 255 as any, textColor: 0, fontStyle: 'bold' as const },
 };
 
-function bagsBody(doc: jsPDF, record: any) {
+function bagsBody(doc: jsPDF, record: any, k = 1) {
+    const tight = k < 1;
     const items = itemsOf(record);
     const valid = items.filter(Boolean);
     const gst = uniformGst(valid);
@@ -144,13 +149,13 @@ function bagsBody(doc: jsPDF, record: any) {
         { text: 'To', gap: 5.5 },
         { text: 'Purchase Department,', gap: 5.5 },
         ...to.map((l, i) => ({ text: `${l}${i === to.length - 1 ? '.' : ','}`, gap: 5.5 })),
-    ], 60);
-    y += 4;
+    ], 60, k);
+    y += 4 * k;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11.5);
     const subject = doc.splitTextToSize(pdfText(`Sub: ${record.quotation_subject || 'Quotation for the Supply of Poly Bags – Reg.'}`), RIGHT - LEFT);
     doc.text(subject, LEFT, y);
-    y += subject.length * 5.5 + 4;
+    y += subject.length * 5.5 + 4 * k;
 
     const widths = [15, 46, 26, 37, 30, 22];
     const body: any[] = (items.length ? items : [null]).map((it: any, i: number) => it ? [
@@ -168,6 +173,7 @@ function bagsBody(doc: jsPDF, record: any) {
         margin: { left: LEFT - 6, right: PAGE_W - (LEFT - 6) - widths.reduce((a, b) => a + b, 0) },
         head: [['Sl. No', 'Description', 'Rate/KG', 'No. of Bags/KG', 'Qty In KG', 'Total']],
         body,
+        styles: { ...tableStyles.styles, cellPadding: tight ? 1.3 : 2 },
         columnStyles: Object.fromEntries(widths.map((w, i) => [i, { cellWidth: w }])),
     });
     y = (doc as any).lastAutoTable.finalY;
@@ -185,15 +191,15 @@ function bagsBody(doc: jsPDF, record: any) {
             [gst === null ? 'GST' : `GST ${gst}%`, plain(gstAmount)],
             ['Grand Total', plain(subTotal + gstAmount)],
         ],
-        styles: { ...tableStyles.styles, fontStyle: 'bold', cellPadding: 1.5 },
+        styles: { ...tableStyles.styles, fontStyle: 'bold', cellPadding: tight ? 1.1 : 1.5 },
         columnStyles: { 0: { cellWidth: widths[3] + widths[4] }, 1: { cellWidth: widths[5], halign: 'right' } },
     });
-    y = (doc as any).lastAutoTable.finalY + 6;
+    y = (doc as any).lastAutoTable.finalY + 6 * k;
 
     return lines(doc, [
         { text: 'Terms & Conditions:', bold: true, x: LEFT + 10 },
         ...TERMS.map((t, i) => ({ text: `${i + 1}. ${t}`, x: LEFT + 10 })),
-    ], y);
+    ], y, k);
 }
 
 function tradingBody(doc: jsPDF, record: any, assets: QuotationPdfAssets) {
@@ -250,11 +256,23 @@ function tradingBody(doc: jsPDF, record: any, assets: QuotationPdfAssets) {
 
 /** The quotation as a PDF document. */
 export function buildQuotationPdf(record: any, assets: QuotationPdfAssets = {}): jsPDF {
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    letterhead(doc, assets);
-    const y = quotationTypeOf(record) === 'TRADING' ? tradingBody(doc, record, assets) : bagsBody(doc, record);
-    signOff(doc, record, y);
-    footer(doc);
+    const build = (k: number) => {
+        const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+        letterhead(doc, assets);
+        const y = quotationTypeOf(record) === 'TRADING' ? tradingBody(doc, record, assets) : bagsBody(doc, record, k);
+        signOff(doc, record, y, k);
+        footer(doc);
+        return doc;
+    };
+    const doc = build(1);
+    // A bags quotation that misses one page is rebuilt with spacing tightened step by step,
+    // only as much as it needs (same fonts and layout)
+    if (doc.getNumberOfPages() > 1 && quotationTypeOf(record) !== 'TRADING') {
+        for (const k of [0.9, 0.8, 0.7]) {
+            const tight = build(k);
+            if (tight.getNumberOfPages() === 1) return tight;
+        }
+    }
     return doc;
 }
 
