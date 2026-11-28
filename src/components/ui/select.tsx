@@ -143,8 +143,11 @@ function SelectSearch({ className, ...props }: React.ComponentProps<"input">) {
       }
     }
     content.addEventListener("keydown", onKey, true)
+    // A phone keyboard opening resizes the window, and Radix closes the list on resize; keep it open while typing
+    const onResize = (e: Event) => { if (document.activeElement === input) e.stopImmediatePropagation() }
+    window.addEventListener("resize", onResize, true)
     const t = setTimeout(() => input.focus(), 0)
-    return () => { content.removeEventListener("keydown", onKey, true); clearTimeout(t) }
+    return () => { content.removeEventListener("keydown", onKey, true); window.removeEventListener("resize", onResize, true); clearTimeout(t) }
   }, [])
   return (
     <div className="sticky top-0 z-10 bg-popover p-1">
